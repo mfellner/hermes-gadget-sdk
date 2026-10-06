@@ -238,7 +238,7 @@ void Ui::render(const UiModel& m) {
                   .val(m.screen == Screen::Listening ? m.level : uint8_t(0))
                   .val(m.speaking)
                   .get();
-  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).get();
+  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).add(m.qr).get();
   hashes[3] = Hash().add(m.hint).get();
 
   if (m.hero) {
@@ -433,6 +433,11 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   c.fill_rect(0, y0, w, y1 - y0, kBg);
   int y = y0 + margin;
 
+  if (!m.qr.empty()) {
+    draw_qr(c, m, y0, y1);
+    return;
+  }
+
   if (m.color_test) {
     const uint16_t colors[] = {rgb565(255, 0, 0), rgb565(0, 255, 0), rgb565(0, 0, 255),
                                rgb565(255, 255, 255), rgb565(0, 0, 0)};
@@ -625,6 +630,42 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
     };
     if (!m.yes.empty()) button(margin, m.yes, kGreenDim);
     if (!m.no.empty()) button(margin + bw + gap, m.no, kRedDim);
+  }
+}
+
+void Ui::draw_qr(Canvas& c, const UiModel& m, int y0, int y1) {
+  // A QR code as large as fits, dark on light with its quiet zone, then the
+  // detail line and up to two body lines under it.
+  if (qr_text_ != m.qr) {
+    qr_text_ = m.qr;
+    qr_code_ = qr::encode(m.qr);
+  }
+  const int s = layout_.scale, w = info_.width, margin = 4 * s, lh = Canvas::line_height(s);
+  const int cols = cols_for(w - 2 * margin, s);
+  std::vector<std::string> lines = wrap_text(m.body, cols);
+  if (lines.size() > 2) lines.resize(2);
+  const int text_h = lh * (1 + static_cast<int>(lines.size()));
+  const int quiet = 4, modules = qr_code_.size + 2 * quiet;
+  int y = y0 + margin;
+  if (qr_code_.size) {
+    const int room = std::min(w - 2 * margin, y1 - y0 - 3 * margin - text_h);
+    const int px = std::max(1, room / modules);
+    const int side = px * modules, x = (w - side) / 2;
+    c.fill_rect(x, y, side, side, rgb565(255, 255, 255));
+    for (int my = 0; my < qr_code_.size; ++my) {
+      const int top = y + (my + quiet) * px;
+      for (int mx = 0; mx < qr_code_.size; ++mx) {
+        if (qr_code_.at(mx, my)) c.fill_rect(x + (mx + quiet) * px, top, px, px, rgb565(0, 0, 0));
+      }
+    }
+    y += side + margin;
+  }
+  const std::string detail = fit(m.detail, cols);
+  c.text((w - Canvas::text_width(detail, s)) / 2, y, detail, s, kAccent);
+  y += lh;
+  for (const std::string& line : lines) {
+    c.text((w - Canvas::text_width(line, s)) / 2, y, line, s, kText);
+    y += lh;
   }
 }
 

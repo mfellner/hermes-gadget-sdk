@@ -236,6 +236,14 @@ class App {
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
+  // Phone setup as two QR codes (join the network, open the page), when the
+  // port's instructions name the network ("Network: "), its password
+  // ("Password: ") and the page ("Open <url>"). TALK switches between them.
+  struct SetupCodes {
+    std::string ssid, password, url;
+  };
+  std::optional<SetupCodes> setup_codes_;
+  int setup_page_ = 0;
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;

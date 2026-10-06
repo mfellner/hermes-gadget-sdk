@@ -14,6 +14,7 @@
 #include "hg/canvas.hpp"
 #include "hg/hal.hpp"
 #include "hg/mascot.hpp"
+#include "hg/qr.hpp"
 
 namespace hg {
 
@@ -54,6 +55,7 @@ struct UiModel {
   uint32_t frame = 0;    // animation frame, advanced by the app
   std::string hint;      // bottom bar
   std::string yes, no;   // answer buttons under the hero caption (Prompt screen)
+  std::string qr;        // Setup screen: text to show as a QR code above detail and body
   // Show the mascot as large as fits, with headline/detail as a caption,
   // instead of the header + text layout.
   bool hero = false;
@@ -113,6 +115,7 @@ class Ui {
   void draw_top(Canvas& c, const UiModel& m);
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
+  void draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
   struct HeroGeom {
@@ -140,6 +143,8 @@ class Ui {
   UiLayout layout_;
   uint32_t hash_[4] = {0, 0, 0, 0};
   uint32_t hero_static_ = 0, hero_anim_ = 0;
+  std::string qr_text_;  // the code below encodes this
+  qr::Code qr_code_;
   bool hero_valid_ = false;
   bool valid_ = false;
 };

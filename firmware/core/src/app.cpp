@@ -6,6 +6,7 @@
 
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
+#include "hg/qr.hpp"
 
 namespace hg {
 namespace {
@@ -766,6 +767,10 @@ void App::h_error(const json::Value& m) {
 void App::on_button(Button button, bool pressed) {
   if (!wifi_setup_text_.empty()) {
     if (button == Button::Cancel && !pressed) close_wifi_setup();
+    if (button != Button::Cancel && !pressed && setup_codes_) {  // the other code
+      setup_page_ ^= 1;
+      update_model();
+    }
     return;
   }
   const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
@@ -1377,6 +1382,7 @@ void App::update_model() {
   m.body.clear();
   m.yes.clear();
   m.no.clear();
+  m.qr.clear();
   m.hero = false;
   m.caption_lines = 1;
   m.scroll = scroll_;
@@ -1399,6 +1405,20 @@ void App::update_model() {
     m.body = wifi_setup_text_;
     m.scroll = 0;
     m.hint = profile_.touch_screen ? "Swipe down to close" : profile_.cancel_label + " to close";
+    if (setup_codes_) {
+      // Scan to join the setup network, then scan to open its page.
+      if (setup_page_ == 0) {
+        m.qr = qr::wifi_payload(setup_codes_->ssid, setup_codes_->password);
+        m.detail = "1/2 Scan to join Wi-Fi";
+        m.body = setup_codes_->ssid + "  " + setup_codes_->password;
+      } else {
+        m.qr = setup_codes_->url;
+        m.detail = "2/2 Scan to open setup";
+        m.body = setup_codes_->url;
+      }
+      m.hint = profile_.touch_screen ? "Tap: next  Swipe: close"
+                                     : profile_.talk_label + ": next  " + profile_.cancel_label + ": close";
+    }
     if (ui_) ui_->render(m);
     return;
   }
