@@ -534,6 +534,9 @@ class _FakeRunner:
     def _cached_agent_for(self, key):
         return None
 
+    async def _resolve_route_context(self, source, model, route):
+        return types.SimpleNamespace(context_length=200000, context_source="models_dev")
+
     async def _resume_row_visible(self, source, row, allow_all):
         return row.get("id") != "hidden"
 
@@ -611,7 +614,7 @@ def test_menu_status_is_a_card_without_a_turn(menu_gadget, make_sim):
     card = sim.last_received("display")
     assert card["title"] == "Status"
     assert "Model: claude-sonnet-5-5" in card["body"] and "Session: Weather plans" in card["body"]
-    assert "Context: 1,200 tokens" in card["body"] and "Tokens used: 4,567" in card["body"]
+    assert "Context: 1,200 of 200,000 (1%)" in card["body"] and "Tokens used: 4,567" in card["body"]
     assert sim.last_received("turn.start") is None  # no "thinking", nothing spoken
     assert "menu" not in sim.status()
 

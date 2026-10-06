@@ -156,8 +156,13 @@ class GadgetMenus:
             running = agent is not None and agent is not _AGENT_PENDING_SENTINEL
             runner._rehydrate_session_model_override(key)
             override = runner._session_model_override(key) or {}
-            model, provider, used, total, _route = _status_model_route(
+            model, provider, used, total, model_route = _status_model_route(
                 agent if running else runner._cached_agent_for(key), override, route or {}, row or {}, entry)
+            if not total and model:
+                # Like /status: a window only the fallback guessed stays unknown.
+                resolved = await runner._resolve_route_context(source, model, model_route)
+                if resolved is not None and resolved.context_source != "default":
+                    total = int(resolved.context_length or 0)
         except Exception as exc:
             logger.debug("[%s] cannot read Hermes state for %s: %s", self.name, session.device_id, exc)
             return None
@@ -193,8 +198,10 @@ class GadgetMenus:
             lines.append(f"Provider: {state['provider_label']}")
         lines.append(f"Session: {state['title'] or ('untitled' if state['session_id'] else 'none yet')}")
         used, total = state["context_used"], state["context_total"]
-        if total:
+        if total and used:
             lines.append(f"Context: {used:,} of {total:,} ({min(100, round(used * 100 / total))}%)")
+        elif total:
+            lines.append(f"Context window: {total:,}")
         elif used:
             lines.append(f"Context: {used:,} tokens")
         lines.append(f"Tokens used: {state['tokens']:,}")
