@@ -64,6 +64,7 @@ Because the id is derived from the key, nobody can claim another device's id wit
 ```
 
 - Every `caps` member is optional. A device without a speaker omits `speaker`, and the server then never sends it audio.
+- `caps.menu` (`true`) means the device shows `menu` lists and the `info` line (see [Menus](#menus)).
 - `caps.ota` (`{"max_size": 2031616}`) means the device installs firmware updates over this connection, up to `max_size` bytes.
 - `actions` is the device's tool manifest. Each action has a JSON-Schema `params` object and a `description` written for the model.
 - `token` is required only when the host sets `GADGET_ACCESS_TOKEN`. A mismatch is rejected with error code `bad_token`.
@@ -114,6 +115,9 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "cancel"}` | Stop the current turn (Hermes `/stop`) |
 | `{"type": "session.new"}` | Start a fresh conversation (Hermes `/new`). The reference firmware sends it when CANCEL is held for 2 s |
 | `{"type": "prompt.reply", "id": "q1", "answer": "yes"}` | The answer (`yes` or `no`) to a `prompt` |
+| `{"type": "menu.open", "menu": "main"}` | Ask for the server's menu; see [Menus](#menus) |
+| `{"type": "menu.select", "id": "m1", "item": "model"}` | The user picked an item of menu `m1` |
+| `{"type": "menu.close", "id": "m1"}` | The user left the menu |
 
 - Utterances shorter than 0.25 s are dropped with a `notice`.
 - The server caps an utterance at `max_utterance_s` (60 s by default).
@@ -131,6 +135,9 @@ If authentication fails, the server sends `{"type": "error", "code": "auth_faile
 | `{"type": "notice", "text": "...", "ttl_s": 8}` | Transient one-line message |
 | `{"type": "prompt", "id": "q1", "title": "Confirm /new", "text": "...", "ttl_s": 300}` | A yes/no question; see [Questions](#questions) |
 | `{"type": "prompt.close", "id": "q1"}` | The question was withdrawn (timed out or answered elsewhere) |
+| `{"type": "menu", "id": "m1", "title": "Hermes", "items": [{"id": "model", "label": "Model", "note": "gpt-6.1", "current": true}]}` | Show a list to pick from; see [Menus](#menus) |
+| `{"type": "menu.close", "id": "m1"}` | The menu is done (a `display` card or `notice` usually follows) |
+| `{"type": "info", "model": "claude-sonnet-5-5", "provider": "Anthropic", "session": "Weather plans"}` | What Hermes runs for this device, for the idle screen. Sent on connect and after each turn |
 | `{"type": "error", "code": "...", "message": "..."}` | Protocol or auth error; the server usually closes the connection next |
 
 Reply text is already shaped for the device: Markdown is stripped and the text is folded to ASCII when `charset` is `"ascii"`. Devices render it as-is.
@@ -165,6 +172,26 @@ Hermes asks before some actions: destructive commands such as `/new`, a costly m
 - The device answers with `prompt.reply` exactly once, or not at all if the question expires (`ttl_s`, when present) or is withdrawn with `prompt.close`.
 - The server sends one question at a time. A question asked while a device was offline is sent again when it reconnects.
 - Text is shaped like replies: short, plain and already folded to the device's charset.
+
+### Menus
+
+Devices with `caps.menu` let the user check and change what Hermes does for them: its status, the model, and the conversation.
+
+1. The device sends `menu.open` with `menu: "main"`.
+2. The server answers with a `menu`: a title and up to 64 items. Each item has an `id` and a `label`, and optionally a `note` (shown dimmed on the right) and `current` (the active choice; the device starts its cursor there).
+3. A pick is reported with `menu.select`. The server answers it with another `menu` (a submenu, or the same one), a `notice` (the menu stays; e.g. Hermes is busy), or `menu.close` followed by a `display` card or a `notice`. A device waits for one answer before it sends another pick.
+4. `menu.close` from the device means the user left.
+
+The server owns navigation: submenus carry their own "< Back" item. The server may also open a menu on its own, for instance for a `/model` typed into Hermes. The Hermes plugin offers:
+
+| Item | What it does |
+|---|---|
+| Status | A `display` card: model, provider, session title, context window use and tokens |
+| Model | Hermes's `/model` picker: providers, then models. The pick applies to this device's session |
+| Sessions | The device's ten most recent sessions, titled or not, and "New session". A pick runs `/resume` |
+| New session | Hermes `/new`, confirmed on the device's behalf |
+
+Labels are shaped like reply text. A device trims what doesn't fit.
 
 ### Device actions
 

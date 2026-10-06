@@ -18,6 +18,19 @@ Try asking Hermes to show a reminder on the screen. The agent can use `gadget_di
 
 If speech is missing, check [audio setup](connect-hermes.md#4-enable-speech). For connection problems, use [troubleshooting](troubleshooting.md). To change Wi-Fi or install firmware updates, see [Manage an existing gadget](setup-board.md#manage-an-existing-gadget).
 
+## Hermes menu: status, model and sessions
+
+The idle screen shows the model Hermes uses for this device and the title of the current conversation, once Hermes has titled it. To change either, open settings (see below): the first page, **Hermes**, opens a menu with:
+
+| Item | What it does |
+|---|---|
+| Status | Model, provider, session title, context window use and tokens used |
+| Model | Choose a provider, then a model. The switch applies to this device's conversation, like `/model` in a chat |
+| Sessions | Your ten most recent conversations, newest first, plus **New session**. Pick one to continue it |
+| New session | Start a fresh conversation |
+
+On a touchscreen, tap a row to pick it, swipe up to see more rows, and swipe down to close the menu. With buttons, TALK picks the highlighted row and CANCEL moves to the next one; the last row closes the menu (boards with Up and Down buttons move with them and close with CANCEL). Hermes can't switch models or sessions while it is answering: the device says so, and you can pick again once the reply is done. The serial console's `menu` command does the same (`menu`, `menu next`, `menu pick <n>`, `menu close`).
+
 ## Device settings and hardware checks
 
 Hold TALK and CANCEL together for one second to open or close device settings. On a touchscreen, hold the title bar for one second. Settings also work while the device is offline. Opening settings stops the current recording or reply.
@@ -26,6 +39,7 @@ Tap CANCEL to move to the next item, then tap TALK to change it. On a touchscree
 
 | Item | What it does |
 |---|---|
+| Hermes | Show the model and session; select it for the [Hermes menu](#hermes-menu-status-model-and-sessions) |
 | Speaker volume | Change volume in steps of 10 percent |
 | Screen brightness | Choose 10, 25, 50, 75, or 100 percent when the display supports it |
 | Talk mode | Choose hold-to-talk or tap-to-talk with silence detection |

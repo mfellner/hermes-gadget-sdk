@@ -285,6 +285,8 @@ It runs as one app of the [esp32-playground](https://github.com/mfellner/esp32-p
 | Tap the screen, or press KEY | Answer "yes" to a question; show the next setup QR code |
 | Swipe down, or press BOOT | CANCEL: discard a recording, stop a reply, answer "no" |
 | Hold BOOT for 1 s | Open the platform launcher |
+| Hold the title bar for 1 s | Settings; its first page opens the [Hermes menu](using-gadget.md#hermes-menu-status-model-and-sessions) |
+| In a menu: tap a row, or press KEY | Pick it. BOOT moves to the next row, swipe up shows more rows, swipe down closes |
 | Press PWR | Screen off, or back on |
 | Hold PWR for 6 s | Power off (AXP2101) |
 
