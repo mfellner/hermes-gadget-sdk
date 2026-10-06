@@ -499,3 +499,211 @@ def test_staged_firmware_the_device_refuses_is_dropped(gadget, make_sim, monkeyp
     status = queue.status(device_id)
     assert status["code"] == "wrong_board" and "built for esp32s3-breadboard" in status["error"]
     assert queue.pending() == [] and sim.update_image is None
+
+
+# -- the device's Hermes menu: status, model, sessions --------------------------------------
+
+
+class _FakeRunner:
+    """The gateway-runner slice the menus read (session store, /status's route resolution)."""
+
+    def __init__(self, title="Weather plans", override=None, running=False):
+        self.title = title
+        self.override = override if override is not None else {"model": "anthropic/claude-sonnet-5-5",
+                                                               "provider": "anthropic"}
+        self._running_agents = {"key-dev": object()} if running else {}
+        self._session_db = types.SimpleNamespace()
+        self.session_store = types.SimpleNamespace(
+            lookup_by_session_key=lambda key: types.SimpleNamespace(session_id="sess-1", last_prompt_tokens=1200))
+
+    def _normalize_source_for_session_key(self, source):
+        return source
+
+    def _session_key_for_source(self, source):
+        return "key-dev"
+
+    async def _status_session_db_facts(self, session_id):
+        return self.title, {}, 4567, {}
+
+    def _rehydrate_session_model_override(self, key):
+        pass
+
+    def _session_model_override(self, key):
+        return self.override
+
+    def _cached_agent_for(self, key):
+        return None
+
+    async def _resume_row_visible(self, source, row, allow_all):
+        return row.get("id") != "hidden"
+
+
+@pytest.fixture
+def menu_gadget(gadget, monkeypatch):
+    """The adapter with a fake runner and a handler that answers the commands menus run."""
+    import sys
+
+    # Importing the real gateway.run starts Hermes's entry-point bootstrap (a managed runtime for
+    # this test's HERMES_HOME). The menus only need the names /status's route resolution reads.
+    stub = types.ModuleType("gateway.run")
+    stub._AGENT_PENDING_SENTINEL = object()
+    stub._load_gateway_config = lambda *a, **kw: {}
+    stub._resolve_gateway_model = lambda config: ""
+    monkeypatch.setitem(sys.modules, "gateway.run", stub)
+    runner = _FakeRunner()
+    adapter = gadget.adapter
+    monkeypatch.setattr(adapter, "_runner", lambda: runner)
+    gadget.runner, gadget.commands, gadget.picked = runner, [], []
+
+    async def handler(event):
+        gadget.events.append(event)
+        text = event.text or ""
+        if text.startswith(("/model", "/resume", "/new")):
+            gadget.commands.append(text)
+        if text == "/model":
+            async def selected(chat_id, model_id, provider):
+                gadget.picked.append((chat_id, model_id, provider))
+                return f"Model switched to {model_id}\nProvider: {provider}"
+
+            providers = [
+                {"slug": "anthropic", "name": "Anthropic", "is_current": True, "total_models": 2,
+                 "models": ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5"]},
+                {"slug": "openai", "name": "OpenAI", "is_current": False, "total_models": 1,
+                 "models": ["gpt-6.1"]},
+            ]
+            await adapter.send_model_picker(event.source.chat_id, providers, "anthropic/claude-sonnet-5-5",
+                                            "anthropic", "key-dev", selected)
+            return None
+        if text.startswith("/resume "):
+            return f"Resumed session **{text.split()[1]}**"
+        return f"echo: {text}"
+
+    adapter.set_message_handler(handler)
+    return gadget
+
+
+def _menu(sim, title, timeout=10):
+    """The labels of the menu the simulator shows (it has UP/DOWN, so no Close row is added)."""
+    assert sim.wait_for(lambda: (sim.status().get("menu") or {}).get("title") == title
+                        and not sim.status()["menu"]["loading"], timeout=timeout), sim.status().get("menu")
+    return sim.status()["menu"]["items"]
+
+
+def test_paired_devices_get_the_model_and_session_for_the_idle_screen(menu_gadget, make_sim):
+    sim = _paired_sim(menu_gadget, make_sim)
+    assert sim.wait_for(lambda: sim.status().get("model") == "claude-sonnet-5-5", timeout=10)
+    assert sim.status()["session"] == "Weather plans"
+    assert sim.last_received("info")["provider"] == "Anthropic"
+    # A finished turn may have titled the session: the device hears about it.
+    menu_gadget.runner.title = "Trip to Rome"
+    sim.type_text("hello")
+    assert sim.wait_for(lambda: sim.status().get("session") == "Trip to Rome", timeout=10)
+
+
+def test_menu_status_is_a_card_without_a_turn(menu_gadget, make_sim):
+    sim = _paired_sim(menu_gadget, make_sim)
+    assert sim.console("menu") == "@ok menu"
+    items = _menu(sim, "Hermes")
+    assert items == ["Status", "Model", "Sessions", "New session"]
+    assert sim.last_received("menu")["items"][1]["note"] == "claude-sonnet-5-5"
+    sim.console("menu pick 0")
+    assert sim.wait_screen("card", timeout=10)
+    card = sim.last_received("display")
+    assert card["title"] == "Status"
+    assert "Model: claude-sonnet-5-5" in card["body"] and "Session: Weather plans" in card["body"]
+    assert "Context: 1,200 tokens" in card["body"] and "Tokens used: 4,567" in card["body"]
+    assert sim.last_received("turn.start") is None  # no "thinking", nothing spoken
+    assert "menu" not in sim.status()
+
+
+def test_menu_switches_the_model_through_hermes_picker(menu_gadget, make_sim):
+    sim = _paired_sim(menu_gadget, make_sim)
+    sim.console("menu")
+    _menu(sim, "Hermes")
+    sim.console("menu pick 1")
+    assert _menu(sim, "Provider") == ["Anthropic", "OpenAI", "< Back"]
+    assert sim.last_received("menu")["items"][0]["current"] is True
+    sim.console("menu pick 0")
+    assert _menu(sim, "Anthropic") == ["claude-sonnet-5-5", "claude-opus-5-5", "< Back"]
+    assert sim.status()["menu"]["cursor"] == 0  # the current model
+    sim.console("menu pick 2")  # back to the providers
+    _menu(sim, "Provider")
+    sim.console("menu pick 1")
+    assert _menu(sim, "OpenAI") == ["gpt-6.1", "< Back"]
+    sim.console("menu pick 0")
+    assert sim.wait_screen("card", timeout=10)
+    assert menu_gadget.picked == [(sim.status()["device_id"], "gpt-6.1", "openai")]
+    assert sim.last_received("display")["body"].startswith("Model switched to gpt-6.1")
+    assert menu_gadget.commands == ["/model"]
+    assert sim.last_received("turn.start") is None
+
+
+def test_menu_lists_and_resumes_sessions(menu_gadget, make_sim, monkeypatch):
+    import time as _time
+
+    import hermes_cli.session_listing as listing
+
+    now = _time.time()
+    rows = [
+        {"id": "sess-1", "title": "Weather plans", "last_active": now - 120, "is_current_session": True},
+        {"id": "sess-0", "title": None, "preview": "what   is a “good” espresso", "last_active": now - 7200},
+        {"id": "hidden", "title": "Someone else's", "last_active": now},
+    ]
+    calls = []
+
+    def query(db, **kw):
+        calls.append(kw)
+        return rows
+
+    monkeypatch.setattr(listing, "query_session_listing", query)
+    sim = _paired_sim(menu_gadget, make_sim)
+    sim.console("menu")
+    _menu(sim, "Hermes")
+    sim.console("menu pick 2")
+    assert _menu(sim, "Sessions") == ["New session", "Weather plans", 'what is a "good" espresso', "< Back"]
+    sent = sim.last_received("menu")["items"]
+    assert sent[1]["current"] is True and sent[1]["note"] == "2m" and sent[2]["note"] == "2h"
+    assert calls[0]["include_unnamed"] is True and calls[0]["session_key"] == "key-dev"
+    sim.console("menu pick 1")  # the current session
+    assert sim.wait_for(lambda: "menu" not in sim.status(), timeout=10)
+    assert sim.last_received("notice")["text"] == "Already in this session"
+    sim.console("menu")
+    _menu(sim, "Hermes")
+    sim.console("menu pick 2")
+    _menu(sim, "Sessions")
+    sim.console("menu pick 2")
+    assert sim.wait_screen("card", timeout=10)
+    assert menu_gadget.commands[-1] == "/resume sess-0"
+    assert sim.last_received("display") == {**sim.last_received("display"), "title": "Session",
+                                            "body": "Resumed session sess-0"}
+
+
+def test_menu_new_session_and_busy_hermes(menu_gadget, make_sim):
+    sim = _paired_sim(menu_gadget, make_sim)
+    sim.console("menu")
+    _menu(sim, "Hermes")
+    sim.console("menu pick 3")
+    assert sim.wait_for(lambda: "/new" in menu_gadget.commands, timeout=10)
+    assert "menu" not in sim.status()
+    # While a turn runs, switching models waits; the list stays for another pick.
+    adapter = menu_gadget.adapter
+    session = adapter.hub.get(sim.status()["device_id"])
+    key = adapter._source_session_key(adapter._source(session))
+    adapter._active_sessions[key] = __import__("asyncio").Event()
+    try:
+        sim.console("menu")
+        _menu(sim, "Hermes")
+        sim.console("menu pick 1")
+        assert sim.wait_for(lambda: (sim.last_received("notice") or {}).get("text", "").startswith("Hermes is busy"),
+                            timeout=10)
+        assert sim.status()["menu"]["title"] == "Hermes" and not sim.status()["menu"]["loading"]
+        assert "/model" not in menu_gadget.commands
+    finally:
+        adapter._active_sessions.pop(key, None)
+
+
+def test_without_menus_the_model_picker_falls_back_to_text(menu_gadget):
+    session = types.SimpleNamespace(paired=True, has_menus=False)
+    menu_gadget.adapter._session = lambda chat_id: session
+    result = menu_gadget.run(menu_gadget.adapter.send_model_picker("hg-x", [], "", "", "k", None))
+    assert result.success is False

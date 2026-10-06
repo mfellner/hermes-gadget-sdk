@@ -53,6 +53,7 @@ from gateway.platforms.event import MessageEvent, MessageType
 from . import audio as gaudio
 from . import imaging, ota, runtime, textfmt
 from .hub import DeviceHub, DeviceSession, HubDelegate
+from .menus import GadgetMenus
 from .store import DeviceStore
 
 logger = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ def confirm_text(title: str, message: str, charset: str = "ascii") -> Tuple[str,
     return head or textfmt.for_device(title, charset), detail
 
 
-class GadgetAdapter(BasePlatformAdapter, HubDelegate):
+class GadgetAdapter(GadgetMenus, BasePlatformAdapter, HubDelegate):
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
     supports_status_text = True
 
@@ -160,6 +161,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
         self._registry_key = "default"
         self._prompts: Dict[str, List[_Prompt]] = {}  # device id -> questions, oldest (shown) first
         self._new_requested: Dict[str, float] = {}  # device id -> when it asked for a new session
+        self._init_menus()
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -237,6 +239,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             self._store.clear_pairing(session.device_id)
             await self._claim_home(session)
             await self._show_prompt(session)  # a question asked while it was away
+            self._refresh_info(session)
             return
         cached = self._store.pairing_for(session.device_id)
         if cached:
@@ -273,6 +276,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
                         await session.set_paired(True)
                         logger.info("[%s] device %s approved", self.name, session.device_id)
                         await self._claim_home(session)
+                        self._refresh_info(session)
                     elif not verdict and session.paired:
                         await session.set_paired(False)
                         await self.on_ready(session)
@@ -399,6 +403,8 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
     async def on_disconnect(self, session: DeviceSession) -> None:
         if self._hub and session.device_id not in self._hub.sessions:
             self._turns.pop(session.device_id, None)
+            self._menus.pop(session.device_id, None)
+            self._pickers.pop(session.device_id, None)
 
     # -- turn lifecycle -------------------------------------------------------------
 
@@ -416,6 +422,7 @@ class GadgetAdapter(BasePlatformAdapter, HubDelegate):
             return
         turn = self._turns.pop(session.device_id, None) or event.message_id or ""
         await session.turn_end(turn, getattr(outcome, "value", str(outcome)))
+        self._refresh_info(session)  # a first reply titles the session; /new and /model change it
 
     def set_status_text(self, chat_id: str, text: Optional[str]) -> None:
         super().set_status_text(chat_id, text)

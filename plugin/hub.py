@@ -62,6 +62,17 @@ class HubDelegate:
     async def on_state(self, session: "DeviceSession", sensors: dict) -> None:
         pass
 
+    async def on_menu_open(self, session: "DeviceSession", menu: str) -> None:
+        """The device asks for a menu by name (``main``); answer with ``session.show_menu``."""
+        await session.close_menu("")
+        await session.send_notice("This server has no menus")
+
+    async def on_menu_select(self, session: "DeviceSession", menu_id: str, item: str) -> None:
+        pass
+
+    async def on_menu_close(self, session: "DeviceSession", menu_id: str) -> None:
+        pass
+
     async def on_disconnect(self, session: "DeviceSession") -> None:
         pass
 
@@ -285,6 +296,22 @@ class DeviceSession:
 
     async def show_card(self, title: str, body: str, ttl_s: float = 15) -> None:
         await self.send_json(protocol.message("display", title=title, body=body, ttl_s=ttl_s))
+
+    @property
+    def has_menus(self) -> bool:
+        """The firmware shows ``menu`` lists and the ``info`` line."""
+        return bool(self.caps.get("menu"))
+
+    async def show_menu(self, menu_id: str, title: str, items: list[dict], ttl_s: float | None = None) -> None:
+        """Show a list; each item is ``{id, label, note?, current?}``. A pick arrives as ``on_menu_select``."""
+        await self.send_json(protocol.message("menu", id=menu_id, title=title, items=items, ttl_s=ttl_s))
+
+    async def close_menu(self, menu_id: str) -> None:
+        await self.send_json(protocol.message("menu.close", id=menu_id))
+
+    async def send_info(self, *, model: str = "", provider: str = "", session: str = "") -> None:
+        """What the device shows while idle: the current model and conversation."""
+        await self.send_json(protocol.message("info", model=model, provider=provider, session=session))
 
     async def show_image(self, width: int, height: int, rgb565: bytes, ttl_s: float = 30) -> None:
         stream = self._next_stream()
@@ -693,6 +720,18 @@ class DeviceHub:
         if prompt_id and answer in ("yes", "no"):
             session.spawn(self.delegate.on_prompt_reply(session, prompt_id, answer == "yes"))
 
+    async def _h_menu_open(self, session: DeviceSession, msg: dict) -> None:
+        menu = str(msg.get("menu") or "main")[:32]
+        session.spawn(self.delegate.on_menu_open(session, menu))
+
+    async def _h_menu_select(self, session: DeviceSession, msg: dict) -> None:
+        menu_id, item = str(msg.get("id") or "")[:64], str(msg.get("item") or "")[:64]
+        if menu_id and item:
+            session.spawn(self.delegate.on_menu_select(session, menu_id, item))
+
+    async def _h_menu_close(self, session: DeviceSession, msg: dict) -> None:
+        session.spawn(self.delegate.on_menu_close(session, str(msg.get("id") or "")[:64]))
+
     async def _h_action_result(self, session: DeviceSession, msg: dict) -> None:
         fut = session._pending.get(str(msg.get("id") or ""))
         if fut is None or fut.done():
@@ -732,6 +771,9 @@ class DeviceHub:
         "cancel": _h_cancel,
         "session.new": _h_session_new,
         "prompt.reply": _h_prompt_reply,
+        "menu.open": _h_menu_open,
+        "menu.select": _h_menu_select,
+        "menu.close": _h_menu_close,
         "action.result": _h_action_result,
         "state": _h_state,
         "event": _h_event,
