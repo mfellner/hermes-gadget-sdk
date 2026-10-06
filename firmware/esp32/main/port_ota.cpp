@@ -32,6 +32,9 @@ void roll_back(void*) {
 }  // namespace
 
 void EspUpdater::start() {
+#if !CONFIG_HG_OTA
+  return;  // this board's other app slots belong to other apps
+#endif
   const esp_partition_t* running = esp_ota_get_running_partition();
   esp_ota_img_states_t state;
   if (!running || esp_ota_get_state_partition(running, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY) return;
@@ -48,12 +51,20 @@ void EspUpdater::start() {
 }
 
 size_t EspUpdater::capacity() const {
+#if !CONFIG_HG_OTA
+  return 0;  // no update slot: hal.updater stays unset and Hermes is told there are no updates
+#endif
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
   return next ? next->size : 0;
 }
 
 bool EspUpdater::begin(size_t size, std::string& error) {
   abort();
+#if !CONFIG_HG_OTA
+  (void)size;
+  error = "over-the-air updates are off on this board; install over USB";
+  return false;
+#endif
   const esp_partition_t* target = esp_ota_get_next_update_partition(nullptr);
   if (!target) {
     error = "this partition table has no update slot; flash the firmware over USB once";
@@ -160,7 +171,11 @@ void EspUpdater::confirm() {
 hg::json::Value EspUpdater::describe() const {
   hg::json::Value d = hg::json::Value::object();
   const esp_partition_t* running = esp_ota_get_running_partition();
+#if CONFIG_HG_OTA
   const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+#else
+  const esp_partition_t* next = nullptr;  // never another app's slot
+#endif
   d.set("running", running ? running->label : "?").set("next", next ? next->label : "none")
       .set("slot_size", next ? next->size : 0u).set("probation", pending_);
   return d;

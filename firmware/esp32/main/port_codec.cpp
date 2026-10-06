@@ -14,10 +14,10 @@ namespace hgp {
 namespace {
 
 const char* TAG = "hg.codec";
-constexpr size_t kMicChunk = 320;             // 20 ms at 16 kHz
+// Samples per microphone event, and so per audio frame sent to Hermes.
+constexpr size_t kMicChunk = static_cast<size_t>(CONFIG_HG_MIC_CHUNK_MS) * CodecAudio::kRate / 1000;
 constexpr size_t kSpeakerBuffer = 48 * 1024;  // ~1.5 s at 16 kHz; the server paces 0.5 s ahead
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
-constexpr uint8_t kMic1And2 = 0x03;           // ES7210 inputs MIC1 | MIC2 (ES7120_SEL_MIC1 | ES7120_SEL_MIC2)
 
 }  // namespace
 
@@ -48,7 +48,7 @@ i2c_master_bus_handle_t bus(const I2cBusConfig& cfg) {
 
 bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus) {
   if (!bus) return false;
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(kSecondI2s, I2S_ROLE_MASTER);
   chan.auto_clear = true;  // silence on underrun instead of repeating the last buffer
   if (i2s_new_channel(&chan, &tx_, &rx_) != ESP_OK) return false;
   i2s_std_config_t std_cfg = {};
@@ -67,7 +67,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   i2s_channel_enable(rx_);
 
   audio_codec_i2s_cfg_t i2s_cfg = {};
-  i2s_cfg.port = I2S_NUM_1;
+  i2s_cfg.port = kSecondI2s;
   i2s_cfg.rx_handle = rx_;
   i2s_cfg.tx_handle = tx_;
   const audio_codec_data_if_t* data_if = audio_codec_new_i2s_data(&i2s_cfg);
@@ -107,7 +107,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   adc_i2c.bus_handle = bus;
   es7210_codec_cfg_t adc = {};
   adc.ctrl_if = audio_codec_new_i2c_ctrl(&adc_i2c);
-  adc.mic_selected = kMic1And2;
+  adc.mic_selected = cfg.mic_mask;  // ES7120_SEL_MIC1 = bit 0, MIC2 = bit 1, ...
   esp_codec_dev_cfg_t in_cfg = {};
   in_cfg.dev_type = ESP_CODEC_DEV_TYPE_IN;
   in_cfg.codec_if = es7210_codec_new(&adc);
@@ -152,7 +152,7 @@ bool CodecMic::start(uint32_t sample_rate) {
 
 void CodecMic::task(void* arg) {
   auto* self = static_cast<CodecMic*>(arg);
-  int16_t pcm[kMicChunk];
+  static int16_t pcm[kMicChunk];  // one mic task; kept off its stack
   for (;;) {
     // Read continuously so a capture starts with fresh samples, not a stale DMA backlog.
     if (esp_codec_dev_read(self->dev_, pcm, sizeof(pcm)) != ESP_CODEC_DEV_OK) {
@@ -172,7 +172,7 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev) {
   uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
-  else buffer_ = xStreamBufferCreate(16 * 1024, 1);
+  else buffer_ = xStreamBufferCreate(CONFIG_HG_SPEAKER_BUFFER_KB * 1024, 1);  // internal RAM
   if (!buffer_) return false;
   xTaskCreate(&CodecSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
   return true;

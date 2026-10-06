@@ -29,7 +29,8 @@ class Lock {
 bool NvsStorage::begin() {
   lock_ = xSemaphoreCreateMutex();
   nvs_handle_t h;
-  esp_err_t err = nvs_open(kNamespace, NVS_READWRITE, &h);
+  // Boards that share flash with other apps keep a partition of their own.
+  esp_err_t err = nvs_open_from_partition(CONFIG_HG_NVS_PARTITION, kNamespace, NVS_READWRITE, &h);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "nvs_open failed: %s", esp_err_to_name(err));
     return false;

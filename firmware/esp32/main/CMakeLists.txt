@@ -4,8 +4,22 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     configure_file(wifi_setup_page.hpp.in wifi_setup_page.hpp @ONLY)
 endif()
 
+# Chips without an I80 LCD peripheral (ESP32-C6) build without the parallel panel.
+set(hg_optional_srcs)
+if(CONFIG_SOC_LCD_I80_SUPPORTED)
+    list(APPEND hg_optional_srcs "port_parallel.cpp")
+endif()
+# The ESP32-C6 board runs as an app of the esp32-playground multi-app platform
+# (requirements may depend on the target, not on Kconfig).
+idf_build_get_property(hg_target IDF_TARGET)
+set(hg_platform_requires)
+if(hg_target STREQUAL "esp32c6")
+    list(APPEND hg_platform_requires mfellner__app_switch)
+endif()
+
 idf_component_register(
     SRCS
+        ${hg_optional_srcs}
         "main.cpp"
         "board.cpp"
         "port_amoled.cpp"
@@ -18,7 +32,7 @@ idf_component_register(
         "port_display.cpp"
         "port_events.cpp"
         "port_ota.cpp"
-        "port_parallel.cpp"
+        "port_platform.cpp"
         "port_power.cpp"
         "port_latch_power.cpp"
         "../../drivers/axp2101.cpp"
@@ -52,4 +66,5 @@ idf_component_register(
         nvs_flash
         mbedtls
         esp_websocket_client
+        ${hg_platform_requires}
 )

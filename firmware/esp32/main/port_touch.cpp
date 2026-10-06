@@ -22,10 +22,12 @@ constexpr uint8_t kCstAck = 0xAB;
 
 }  // namespace
 
-bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus) {
+bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus,
+                       AxpPower* power_key) {
   if (!bus) return false;
   touch_ = touch;
   key_ = key;
+  power_key_ = power_key && power_key->configure_power_key() ? power_key : nullptr;
   if (touch.enabled && touch.controller == TouchController::Ft5x06) {
     esp_lcd_panel_io_i2c_config_t io_cfg = {};
     io_cfg.dev_addr = ESP_LCD_TOUCH_IO_I2C_FT5x06_ADDRESS;
@@ -73,9 +75,10 @@ bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i
     dev.scl_speed_hz = 400000;
     if (i2c_master_bus_add_device(bus, &dev, &key_dev_) != ESP_OK) key_dev_ = nullptr;
   }
-  if (!has_touch() && !key_dev_) return false;
+  if (!has_touch() && !has_key()) return false;
   xTaskCreate(&TouchInput::task, "hg-touch", 3072, this, 5, nullptr);
-  ESP_LOGI(TAG, "touch %s, key %s", has_touch() ? "ready" : "off", key_dev_ ? "ready" : "off");
+  ESP_LOGI(TAG, "touch %s, key %s", has_touch() ? "ready" : "off",
+           key_dev_ ? "ready" : power_key_ ? "PMIC" : "off");
   return true;
 }
 
@@ -101,6 +104,7 @@ bool TouchInput::read_touch(TouchSample& out) {
   int y = (buf[2] << 4) | (buf[3] & 0x0F);
   if (touch_.mirror_x && touch_.width) x = touch_.width - 1 - x;
   if (touch_.mirror_y && touch_.height) y = touch_.height - 1 - y;
+  if (touch_.swap_xy) std::swap(x, y);
   out = {down, static_cast<int16_t>(x), static_cast<int16_t>(y)};
   return true;
 }
@@ -146,6 +150,7 @@ bool TouchInput::read_key(bool& pressed) {
 void TouchInput::task(void* arg) {
   auto* self = static_cast<TouchInput*>(arg);
   bool was_touching = false, key_down = false;
+  unsigned polls = 0;
   for (;;) {
     TouchSample s{};
     if (self->has_touch() && self->read_touch(s)) {
@@ -158,6 +163,10 @@ void TouchInput::task(void* arg) {
       key_down = pressed;
       KeySample k{pressed};
       events::post(EventType::Key, &k, sizeof(k));
+    }
+    if (self->power_key_ && ++polls % 5 == 0 && (self->power_key_->take_power_key() & hg::Axp2101::kKeyShort)) {
+      KeySample k{true};  // every 100 ms; the PMIC latches the press
+      events::post(EventType::PowerKey, &k, sizeof(k));
     }
     vTaskDelay(pdMS_TO_TICKS(kPollMs));
   }

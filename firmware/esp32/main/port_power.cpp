@@ -5,6 +5,7 @@
 namespace hgp {
 
 bool AxpPower::begin(i2c_master_bus_handle_t bus) {
+  if (chip_) return true;
   if (!bus || i2c_master_probe(bus, 0x34, 50) != ESP_OK) return false;
   i2c_device_config_t cfg = {};
   cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;

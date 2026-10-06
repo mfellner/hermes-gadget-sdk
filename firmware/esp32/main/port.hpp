@@ -16,6 +16,8 @@
 #include "freertos/FreeRTOS.h"  // must precede every other FreeRTOS header
 
 #include "board.hpp"
+#include "sdkconfig.h"
+#include "soc/soc_caps.h"
 #include "axp2101.hpp"
 #include "cores3.hpp"
 #include "driver/i2c_master.h"
@@ -37,11 +39,20 @@
 
 namespace hgp {
 
+// The I2S controller for the codec bus and the I2S microphone. Chips with one
+// controller (ESP32-C6) use I2S0, which the separate I2S speaker also uses;
+// no board combines those.
+#if SOC_I2S_NUM > 1
+constexpr i2s_port_t kSecondI2s = I2S_NUM_1;
+#else
+constexpr i2s_port_t kSecondI2s = I2S_NUM_0;
+#endif
+
 // ---------------------------------------------------------------------------
 // Events
 
 enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console, Touch, Key,
-                                 WifiStarted, WifiDisconnected, WifiProvision };
+                                 WifiStarted, WifiDisconnected, WifiProvision, PowerKey };
 
 // Payloads of Touch and Key events (posted by the input task).
 struct TouchSample {
@@ -195,23 +206,31 @@ class ParallelDisplay final : public hg::Display {
   SemaphoreHandle_t done_ = nullptr;
 };
 
-// QSPI AMOLED (CO5300) via esp_lcd panel IO. Same framebuffer and bounce-buffer
-// scheme as SpiDisplay; the controller wants even window coordinates.
+// QSPI AMOLED (CO5300, SH8601 family) via esp_lcd panel IO. Same framebuffer and
+// bounce-buffer scheme as SpiDisplay; the controller wants even window
+// coordinates. With strip_rows set (no PSRAM) there is no framebuffer: the UI
+// draws into two DMA strips, one rendering while the other transmits.
 class AmoledDisplay final : public hg::Display {
  public:
-  bool begin(const AmoledConfig& cfg);
+  // `panel_reset` runs instead of a reset GPIO (e.g. a PMIC rail) when rst is -1.
+  bool begin(const AmoledConfig& cfg, const std::function<void()>& panel_reset = {});
   hg::DisplayInfo info() const override;
   uint16_t* framebuffer() override { return fb_; }
   void flush(uint16_t y0, uint16_t y1) override;
+  uint16_t* strip(uint16_t y0) override;
+  void present(uint16_t y0, uint16_t y1) override;
   void set_backlight(uint8_t percent) override;
 
  private:
   static bool on_trans_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t* edata, void* ctx);
   void command(uint8_t cmd, const uint8_t* data, size_t len);
+  void window(int y0, int y1);
   AmoledConfig cfg_{};
   esp_lcd_panel_io_handle_t io_ = nullptr;
   uint16_t* fb_ = nullptr;
   uint16_t* bounce_ = nullptr;
+  uint16_t* strips_[2] = {nullptr, nullptr};
+  int next_strip_ = 0;
   SemaphoreHandle_t done_ = nullptr;
 };
 
@@ -268,11 +287,16 @@ class CodecSpeaker final : public hg::AudioOut {
 // Polls a CST9217 touchscreen and a TCA9554-mirrored key on the I2C bus from
 // its own task (the controller needs a pause between write and read) and
 // posts Touch and Key events to the app task.
+class AxpPower;
+
 class TouchInput {
  public:
-  bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus);
+  // `power_key`: also poll an AXP2101's PWR key events and post them as PowerKey
+  // events (KeySample.pressed = a short press; long presses are left to the PMIC).
+  bool begin(const TouchConfig& touch, const ExpanderKeyConfig& key, i2c_master_bus_handle_t bus,
+             AxpPower* power_key = nullptr);
   bool has_touch() const { return touch_dev_ != nullptr || managed_touch_ != nullptr; }
-  bool has_key() const { return key_dev_ != nullptr; }
+  bool has_key() const { return key_dev_ != nullptr || power_key_ != nullptr; }
 
  private:
   static void task(void* arg);
@@ -284,12 +308,18 @@ class TouchInput {
   i2c_master_dev_handle_t touch_dev_ = nullptr;
   i2c_master_dev_handle_t key_dev_ = nullptr;
   esp_lcd_touch_handle_t managed_touch_ = nullptr;
+  AxpPower* power_key_ = nullptr;
 };
 
 class AxpPower final : public hg::Power {
  public:
-  bool begin(i2c_master_bus_handle_t bus);
+  bool begin(i2c_master_bus_handle_t bus);  // safe to call again
+  bool ready() const { return chip_ != nullptr; }
   bool enable_audio_supply() { return chip_ && chip_->enable_aldo1_3v3(); }
+  bool enable_amp_supply() { return chip_ && chip_->enable_aldo2_3v3(); }
+  bool set_panel_reset_rail(bool on) { return chip_ && chip_->set_aldo3_3v3(on); }
+  bool configure_power_key() { return chip_ && chip_->configure_power_key(); }
+  unsigned take_power_key() { return chip_ ? chip_->take_power_key() : 0; }
   std::optional<hg::PowerStatus> read() override { return chip_->read(); }
   bool power_off() override { return chip_->power_off(); }
 
@@ -394,6 +424,15 @@ class Wifi {
   std::string ap_name_, ap_password_, nonce_, setup_state_;
   bool accepting_setup_ = false;
 };
+
+namespace platform {
+// Multi-app platform hooks (CONFIG_HG_PLATFORM_APP_SWITCH); no-ops elsewhere.
+void begin(const PlatformKeyConfig& keys);
+bool open_launcher();
+void tick(uint32_t now_ms);
+// Call every ~10 ms from the app task: the board's platform keys.
+void poll_keys(hg::App& app, uint32_t now_ms);
+}  // namespace platform
 
 namespace console {
 // Starts the serial console REPL; lines are executed by hg::App::console on the app task.

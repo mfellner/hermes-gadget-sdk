@@ -22,6 +22,8 @@ namespace {
 #define HG_BOARD_NAME "tdisplay-s3"
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154
 #define HG_BOARD_NAME "waveshare-esp32s3-lcd-154"
+#elif CONFIG_HG_BOARD_WS_ESP32C6_AMOLED_216
+#define HG_BOARD_NAME "waveshare-esp32c6-touch-amoled-2.16"
 #else
 #define HG_BOARD_NAME "custom"
 #endif
@@ -97,6 +99,55 @@ BoardConfig make() {
   b.pwr_key = {};  // This model has no TCA9554. PWR retains its hardware role.
   b.axp_audio_supply = true;  // ALDO1 supplies the analog audio circuit.
 #endif
+  return b;
+}
+#elif CONFIG_HG_BOARD_WS_ESP32C6_AMOLED_216
+// Waveshare ESP32-C6-Touch-AMOLED-2.16: ESP32-C6 (no PSRAM), 16 MB flash, 480x480
+// AMOLED on QSPI (SH8601-family controller), CST9217 touch, ES8311 + ES7210 codecs,
+// NS4150B amplifier, AXP2101 PMIC, QMI8658 IMU, BOOT/KEY/PWR keys.
+// Pins: docs/hardware.md#waveshare-esp32-c6-touch-amoled-216 (schematic 2026-03-26).
+BoardConfig make() {
+  BoardConfig b{};
+  b.name = kBoardName;
+  b.amoled.enabled = true;
+  b.amoled.width = 480;
+  b.amoled.height = 480;
+  b.amoled.cs = 15;
+  b.amoled.sclk = 0;
+  b.amoled.d0 = 1;
+  b.amoled.d1 = 2;
+  b.amoled.d2 = 3;
+  b.amoled.d3 = 4;
+  b.amoled.rst = -1;  // LCD_RESET is the AXP2101 ALDO3 rail
+  b.amoled.init = AmoledInit::Sh8601_480;
+  b.amoled.strip_rows = 24;  // a 450 KB framebuffer does not fit in internal RAM
+  b.amoled.inset = 16;       // the rounded glass hides the corners
+  b.i2c = {8, 7, 400000};
+  b.codec.enabled = true;
+  b.codec.mclk = 19;
+  b.codec.bclk = 20;
+  b.codec.ws = 22;
+  b.codec.dout = 23;
+  b.codec.din = 21;
+  b.codec.pa = -1;          // the amplifier's CTRL is pulled up to ALDO2
+  b.codec.mic_mask = 0x01;  // MIC1; ES7210 MIC3 is the speaker loopback
+  b.touch.enabled = true;
+  b.touch.addr = 0x5A;
+  b.touch.rst = 11;
+  b.touch.width = 480;
+  b.touch.height = 480;
+  b.touch.mirror_y = true;
+  b.touch.swap_xy = true;
+  b.axp2101 = true;
+  b.axp_audio_supply = true;  // ALDO1 powers the ES7210 and the ES8311's analog side
+  b.axp_amp_supply = true;
+  b.axp_panel_reset = true;
+  b.axp_power_key = true;
+  // KEY (GPIO10): hold to talk.
+  // BOOT (GPIO9): quick press cancels, hold 1 s opens the launcher.
+  b.platform_keys = {10, 9};
+  b.talk_label = "KEY";
+  b.cancel_label = "Swipe down";
   return b;
 }
 #elif CONFIG_HG_BOARD_WS_ESP32S3_LCD_154

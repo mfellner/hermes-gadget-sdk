@@ -12,7 +12,8 @@ namespace {
 
 const char* TAG = "hg.ws";
 constexpr int kBufferSize = 4096;
-constexpr size_t kMaxMessage = 512 * 1024;  // images arrive in 4 KB chunks; this only bounds JSON
+// Images arrive in 4 KB chunks; this only bounds JSON (smaller without PSRAM).
+constexpr size_t kMaxMessage = static_cast<size_t>(CONFIG_HG_WS_MAX_MESSAGE_KB) * 1024;
 
 }  // namespace
 

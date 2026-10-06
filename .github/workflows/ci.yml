@@ -155,3 +155,32 @@ jobs:
           name: firmware-${{ matrix.board }}
           path: firmware/esp32/dist/
           if-no-files-found: error
+
+  # The Waveshare ESP32-C6-Touch-AMOLED-2.16 runs as an app of the esp32-playground
+  # multi-app platform, which pins ESP-IDF 5.5.3 and its own flash layout, so it is
+  # built with that exact ESP-IDF rather than PlatformIO. The build checks the
+  # platform layout and fails if the image outgrows its slot.
+  esp32c6-platform:
+    name: ESP32 firmware (waveshare-esp32c6-touch-amoled-216, ESP-IDF 5.5.3)
+    runs-on: ubuntu-24.04
+    container: espressif/idf:v5.5.3
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        working-directory: firmware/esp32
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          B=boards/waveshare-esp32c6-touch-amoled-216
+          idf.py -B build/c6 -D IDF_TARGET=esp32c6 -D SDKCONFIG=build/c6/sdkconfig \
+            -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;$B/sdkconfig.defaults.platform;$B/sdkconfig.defaults" build
+      - name: Keep the image
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-waveshare-esp32c6-touch-amoled-216
+          path: |
+            firmware/esp32/build/c6/hermes_gadget.bin
+            firmware/esp32/build/c6/hermes-flash_args
+            firmware/esp32/build/c6/partition_table/partition-table.bin
+            firmware/esp32/build/c6/project_description.json
+          if-no-files-found: error

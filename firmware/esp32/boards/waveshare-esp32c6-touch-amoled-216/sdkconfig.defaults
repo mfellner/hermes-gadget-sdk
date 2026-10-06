@@ -1,0 +1,30 @@
+# Waveshare ESP32-C6-Touch-AMOLED-2.16: ESP32-C6 (no PSRAM), 16 MB flash, 480x480
+# AMOLED (SH8601-family, QSPI), CST9220 touch, ES8311 + ES7210 codecs, AXP2101.
+# Pins: docs/hardware.md#waveshare-esp32-c6-touch-amoled-216
+#
+# It runs as the `hermes` app of the esp32-playground multi-app platform. Stack
+#   sdkconfig.defaults;boards/<this>/sdkconfig.defaults.platform;boards/<this>/sdkconfig.defaults
+# The platform file (copied unchanged from the platform's layout) sets 16 MB DIO
+# flash and its partition table; this file points at the board-local copy.
+CONFIG_IDF_TARGET="esp32c6"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/waveshare-esp32c6-touch-amoled-216/partitions.csv"
+# CONFIG_ESPTOOLPY_FLASHSIZE_4MB is not set
+# The platform switches apps through otadata; there is no rollback.
+# CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is not set
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+# The USB-C port is the C6's USB Serial/JTAG; the console must live there.
+# CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# The default NVS partition belongs to the other apps: Wi-Fi and PHY calibration
+# stay out of it, and the gadget's settings live in nvs_hermes.
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
+# CONFIG_ESP_PHY_CALIBRATION_AND_DATA_STORAGE is not set
+# KEY (GPIO10) is this firmware's talk button; BOOT held opens the platform launcher.
+CONFIG_APP_SWITCH_KEY_GPIO=-1
+# Internal RAM only: TLS buffers grow only while needed.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_HG_BOARD_WS_ESP32C6_AMOLED_216=y
+# Room for ~0.5 s of microphone audio while the server's ACKs are late (a Mac
+# hosting Hermes over Wi-Fi pauses for AWDL now and then), so sending from the
+# app task does not block it.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384

@@ -260,6 +260,60 @@ This port is written from Waveshare's published pinout and drivers. On the first
 6. **Microphone:** say something; the waves move with your voice, and Hermes's transcript is right.
 7. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
 
+## Waveshare ESP32-C6-Touch-AMOLED-2.16
+
+Board option `waveshare-esp32c6-touch-amoled-216`, for Waveshare's ESP32-C6 board with a square 2.16" 480×480 AMOLED behind rounded glass, touch, two microphones, a speaker output and an AXP2101 power manager. The ESP32-C6 has **no PSRAM**, so this port draws the screen in strips ([strip mode](porting.md#a-different-display)) and keeps 16 pixels clear of the rounded corners. This is an experimental port.
+
+It runs as one app of the [esp32-playground](https://github.com/mfellner/esp32-playground) multi-app platform: a launcher in the factory slot, other apps such as [Sparklet](https://github.com/mfellner/sparklet) in their own slots, and this firmware in the `hermes` slot. The build uses the platform's partition table and bootloader settings and checks them. Install the platform first.
+
+| Part | Chip | Connection |
+|---|---|---|
+| Display | SH8601-family controller (labelled CO5300 by the vendor), QSPI | CS 15, SCLK 0, D0–D3 1/2/3/4; reset through AXP2101 ALDO3 |
+| Touch | CST9217 family (labelled CST9220) | I2C 0x5A, RST 11 (INT 5 unused: polled); swapped and Y-mirrored |
+| Speaker DAC | ES8311 | I2C 0x18; I2S MCLK 19, BCLK 20, WS 22, DOUT 23 |
+| Amplifier | NS4150B | enabled by AXP2101 ALDO2 (no GPIO) |
+| Microphones | ES7210 | I2C 0x40; I2S DIN 21, MIC1 (MIC3 is the speaker loopback) |
+| Power | AXP2101 | I2C 0x34; ALDO1 powers the codecs' analog side, ALDO2 the amplifier, ALDO3 resets the panel; battery/USB readings |
+| I2C bus | | SDA 8, SCL 7, 400 kHz |
+| KEY / BOOT / PWR | | GPIO 10 / GPIO 9 / AXP2101 PWRON |
+
+**Controls.**
+
+| Do this | Does |
+|---|---|
+| Hold the screen, or hold KEY | TALK after a short hold: speak while holding, release to send |
+| Tap the screen, or press KEY | Answer "yes" to a question; show the next setup QR code |
+| Swipe down, or press BOOT | CANCEL: discard a recording, stop a reply, answer "no" |
+| Hold BOOT for 1 s | Open the platform launcher |
+| Press PWR | Screen off, or back on |
+| Hold PWR for 6 s | Power off (AXP2101) |
+
+**Settings and memory.** Settings live in the platform's `nvs_hermes` partition; the shared default NVS partition, which other apps use, is never written. Wi-Fi and PHY calibration data stay out of NVS. Over-the-air updates are off because the next app slot belongs to another app: install updates over USB. The device keeps about 140 KB of internal RAM free while connected.
+
+**Build and install** with ESP-IDF 5.5.3 (the platform's version; PlatformIO is not used for this board):
+
+```bash
+cd firmware/esp32
+B=boards/waveshare-esp32c6-touch-amoled-216
+idf.py -B build/c6 -D IDF_TARGET=esp32c6 -D SDKCONFIG=build/c6/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;$B/sdkconfig.defaults.platform;$B/sdkconfig.defaults" build
+idf.py -B build/c6 -p PORT hermes-flash     # writes only the hermes slot
+```
+
+or, from the platform repository, `uv run tools/device.py install hermes <this repo>/firmware/esp32/build/c6 --boot`. `idf.py flash` is disabled for this board: it would overwrite the platform's launcher. `partitions.csv` and `sdkconfig.defaults.platform` in the board directory are unchanged copies of the platform's; the build stops if they differ.
+
+On first start without saved Wi-Fi the screen shows two QR codes: the first joins the setup network, the second (tap or press KEY) opens the setup page ([phone setup](setup-board.md#set-up-wi-fi-with-your-phone)).
+
+### First flash: what to check
+
+1. **Boot log:** `SH8601 480x480 ready (strips)`, `codecs: speaker ready, microphones ready`, `touch ready, key PMIC`, and `parts: display sh8601, microphone es7210, speaker es8311, touch yes, key yes`.
+2. **Screen:** nothing is cut off at the rounded corners; text is upright and not mirrored.
+3. **Touch:** hold to talk; a swipe *down* cancels.
+4. **Keys:** KEY talks after a short hold, BOOT cancels, BOOT held for a second opens the launcher, PWR toggles the screen.
+5. **Microphone and speaker:** the transcript is right; the reply is spoken.
+
+Pin references: [Waveshare schematic](https://files.waveshare.com/wiki/ESP32-C6-Touch-AMOLED-2.16/ESP32-C6-Touch-AMOLED-2.16-Schematic.pdf) (2026-03-26) and the [vendor examples](https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.16) at `294543798f1a44e2f2c4d2976522323f2beee11d`.
+
 ## Build and flash
 
 **No toolchain needed:** the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) flashes each release's prebuilt firmware from Chrome or Edge, then sets up Wi-Fi and pairing. The release files are also on the [releases page](https://github.com/Adolanium/hermes-gadget-sdk/releases), for `esptool.py write_flash 0x0 hermes-gadget-<board>-<version>.bin`, which also erases the board's settings.

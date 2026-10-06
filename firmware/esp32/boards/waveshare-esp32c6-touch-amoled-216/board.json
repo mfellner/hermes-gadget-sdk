@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-C6-Touch-AMOLED-2.16",
+  "summary": "Square 2.16\" 480x480 AMOLED touchscreen without PSRAM, two microphones and a speaker output. Runs as an app of the esp32-playground multi-app platform.",
+  "docs": "docs/hardware.md#waveshare-esp32-c6-touch-amoled-216",
+  "ready_made": false
+}

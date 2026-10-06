@@ -136,3 +136,45 @@ TEST("CoreS3: failed power access stops initialization without releasing reset")
   CHECK(!control.set_brightness(100));
   CHECK_EQ(writes, 2);
 }
+
+TEST("AXP2101: rails and the power key are written like every other app on the board") {
+  std::array<uint8_t, 256> regs{};
+  regs[0x22] = 0x05;  // restart-on-long-press set, over-temperature bit set
+  regs[0x27] = 0x3f;  // every timing field at its maximum
+  regs[0x41] = 0x20;
+  regs[0x90] = 0x80;
+  regs[0x93] = 0xe5;
+  regs[0x94] = 0x40;
+  std::vector<std::pair<uint8_t, uint8_t>> writes;
+  hg::Axp2101 power(
+      [&](uint8_t reg, uint8_t* out, size_t n) {
+        for (size_t i = 0; i < n; ++i) out[i] = regs[reg + i];
+        return true;
+      },
+      [&](uint8_t reg, uint8_t value) {
+        writes.emplace_back(reg, value);
+        if (reg != 0x49) regs[reg] = value;
+        else regs[reg] &= static_cast<uint8_t>(~value);  // write 1 to clear
+        return true;
+      });
+  CHECK(power.configure_power_key());
+  CHECK(regs[0x22] == 0x06);  // power off (not restart) on long press; other bits kept
+  CHECK(regs[0x27] == 0x17);  // IRQ at 1.5 s, off at 6 s, power-on time kept
+  CHECK(regs[0x41] == 0x2c);  // short and long press events on; others kept
+  CHECK(power.enable_aldo2_3v3());
+  CHECK(regs[0x93] == 0xfc && regs[0x90] == 0x82);  // 3.3 V, upper bits kept
+  CHECK(power.set_aldo3_3v3(true));
+  CHECK(regs[0x94] == 0x5c && regs[0x90] == 0x86);
+  CHECK(power.set_aldo3_3v3(false));
+  CHECK(regs[0x90] == 0x82);
+
+  writes.clear();
+  CHECK(power.take_power_key() == hg::Axp2101::kKeyNone);
+  CHECK(writes.empty());  // nothing to clear
+  regs[0x49] = 0x0c | 0x10;  // short + long, and an unrelated event that must stay
+  CHECK(power.take_power_key() == (hg::Axp2101::kKeyShort | hg::Axp2101::kKeyLong));
+  CHECK(regs[0x49] == 0x10);
+  regs[0x49] = 0x08;
+  CHECK(power.take_power_key() == hg::Axp2101::kKeyShort);
+  CHECK(power.take_power_key() == hg::Axp2101::kKeyNone);
+}

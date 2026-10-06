@@ -7,3 +7,11 @@ dependencies:
   espressif/esp_lcd_touch_tt21100: "^1"
   espressif/esp_lcd_touch_gt911: "^1"
   espressif/esp_lcd_touch_ft5x06: "^1"
+  # The ESP32-C6 board is one app of the esp32-playground multi-app platform:
+  # launcher client, shared flash layout and the platform_app_slot() build helper.
+  mfellner/app_switch:
+    git: https://github.com/mfellner/esp32-playground.git
+    path: components/app_switch
+    version: v0.1.0
+    rules:
+      - if: "target in [esp32c6]"
