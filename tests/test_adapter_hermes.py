@@ -648,6 +648,7 @@ def test_menu_lists_and_resumes_sessions(menu_gadget, make_sim, monkeypatch):
         {"id": "sess-1", "title": "Weather plans", "last_active": now - 120, "is_current_session": True},
         {"id": "sess-0", "title": None, "preview": "what   is a “good” espresso", "last_active": now - 7200},
         {"id": "hidden", "title": "Someone else's", "last_active": now},
+        {"id": "20261007_002453_7cdf6fec", "title": None, "preview": "", "started_at": 1791325493.0},
     ]
     calls = []
 
@@ -660,7 +661,8 @@ def test_menu_lists_and_resumes_sessions(menu_gadget, make_sim, monkeypatch):
     sim.console("menu")
     _menu(sim, "Hermes")
     sim.console("menu pick 2")
-    assert _menu(sim, "Sessions") == ["New session", "Weather plans", 'what is a "good" espresso', "< Back"]
+    untitled = "Untitled " + _time.strftime("%b %d %H:%M", _time.localtime(1791325493.0))
+    assert _menu(sim, "Sessions") == ["New session", "Weather plans", 'what is a "good" espresso', untitled, "< Back"]
     sent = sim.last_received("menu")["items"]
     assert sent[1]["current"] is True and sent[1]["note"] == "2m" and sent[2]["note"] == "2h"
     assert calls[0]["include_unnamed"] is True and calls[0]["session_key"] == "key-dev"

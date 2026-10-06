@@ -1620,6 +1620,11 @@ json::Value App::status_value() const {
         .set("loading", menu_loading_);
     s.set("menu", menu);
   }
+  if (overlay_ == Overlay::Card) {
+    json::Value card = json::Value::object();
+    card.set("title", card_title_).set("body", card_body_);
+    s.set("card", card);
+  }
   if (!info_model_.empty()) s.set("model", info_model_);
   if (!info_session_.empty()) s.set("session", info_session_);
   if (!fatal_.empty()) s.set("error", fatal_);

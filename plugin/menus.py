@@ -70,8 +70,13 @@ def ago(ts: Any, now: Optional[float] = None) -> str:
 
 
 def session_label(row: dict, charset: str = "ascii") -> str:
-    """How a session appears in the list: its title, else its first words, else its id."""
-    text = row.get("title") or row.get("preview") or row.get("id") or "?"
+    """How a session appears in the list: its title, else its first words, else when it started."""
+    text = row.get("title") or row.get("preview")
+    if not text:
+        try:
+            text = "Untitled " + time.strftime("%b %d %H:%M", time.localtime(float(row.get("started_at"))))
+        except (TypeError, ValueError, OverflowError):
+            text = row.get("id") or "?"
     return textfmt.for_device(" ".join(str(text).split()), charset)[:MAX_LABEL] or "?"
 
 
