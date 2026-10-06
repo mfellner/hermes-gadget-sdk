@@ -37,7 +37,7 @@ i2s_std_config_t std_config(uint32_t rate, i2s_data_bit_width_t bits, int bclk, 
 // Microphone
 
 bool I2sMic::begin(const I2sMicConfig& cfg) {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(kSecondI2s, I2S_ROLE_MASTER);
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(HG_SECOND_I2S, I2S_ROLE_MASTER);
   if (i2s_new_channel(&chan, nullptr, &rx_) != ESP_OK) return false;
   // INMP441 outputs 24-bit samples in a 32-bit left slot.
   i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);

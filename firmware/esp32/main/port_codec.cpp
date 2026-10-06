@@ -48,7 +48,7 @@ i2c_master_bus_handle_t bus(const I2cBusConfig& cfg) {
 
 bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus) {
   if (!bus) return false;
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(kSecondI2s, I2S_ROLE_MASTER);
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(HG_SECOND_I2S, I2S_ROLE_MASTER);
   chan.auto_clear = true;  // silence on underrun instead of repeating the last buffer
   if (i2s_new_channel(&chan, &tx_, &rx_) != ESP_OK) return false;
   i2s_std_config_t std_cfg = {};
@@ -67,7 +67,7 @@ bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus)
   i2s_channel_enable(rx_);
 
   audio_codec_i2s_cfg_t i2s_cfg = {};
-  i2s_cfg.port = kSecondI2s;
+  i2s_cfg.port = HG_SECOND_I2S;
   i2s_cfg.rx_handle = rx_;
   i2s_cfg.tx_handle = tx_;
   const audio_codec_data_if_t* data_if = audio_codec_new_i2s_data(&i2s_cfg);

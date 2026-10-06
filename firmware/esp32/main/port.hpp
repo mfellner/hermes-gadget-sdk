@@ -42,10 +42,11 @@ namespace hgp {
 // The I2S controller for the codec bus and the I2S microphone. Chips with one
 // controller (ESP32-C6) use I2S0, which the separate I2S speaker also uses;
 // no board combines those.
+// (A macro: the I2S port type lives in different headers across ESP-IDF versions.)
 #if SOC_I2S_NUM > 1
-constexpr i2s_port_t kSecondI2s = I2S_NUM_1;
+#define HG_SECOND_I2S I2S_NUM_1
 #else
-constexpr i2s_port_t kSecondI2s = I2S_NUM_0;
+#define HG_SECOND_I2S I2S_NUM_0
 #endif
 
 // ---------------------------------------------------------------------------
