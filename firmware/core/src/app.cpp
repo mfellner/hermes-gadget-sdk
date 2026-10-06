@@ -80,6 +80,8 @@ const App::Route App::kRoutes[] = {
     {"prompt.close", &App::h_prompt_close}, {"ota.offer", &App::h_ota_offer},
     {"ota.begin", &App::h_ota_begin},     {"ota.end", &App::h_ota_end},
     {"ota.abort", &App::h_ota_abort},
+    {"menu", &App::h_menu},               {"menu.close", &App::h_menu_close},
+    {"info", &App::h_info},
 };
 
 App::App(Hal& hal, DeviceProfile profile) : hal_(hal), profile_(std::move(profile)) {}
@@ -263,6 +265,7 @@ void App::drop_session(std::string_view reason) {
   overlay_ = Overlay::None;
   end_image();
   clear_prompt();
+  menu_reset();
   transport_active_ = false;
   schedule_reconnect();
   online_since_ = 0;
@@ -325,6 +328,7 @@ void App::send_hello() {
   if (profile_.has_scroll_buttons) inputs.push("up").push("down");
   caps.set("inputs", inputs);
   caps.set("talk_mode", talk_mode_ == TalkMode::Tap ? "tap" : "hold");
+  if (hal_.display) caps.set("menu", true);  // shows `menu` lists and the `info` line
   if (hal_.updater) {
     json::Value ota = json::Value::object();
     ota.set("max_size", hal_.updater->capacity());
@@ -597,6 +601,7 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
 
 void App::h_display(const json::Value& m) {
   wake_display();
+  if (menu_loading_) menu_reset();  // the answer to a pick
   card_title_ = m["title"].as_string();
   card_body_ = m["body"].as_string();
   card_scroll_ = 0;
@@ -742,6 +747,7 @@ void App::h_ping(const json::Value& m) {
 }
 
 void App::h_notice(const json::Value& m) {
+  menu_loading_ = false;  // e.g. "busy": the menu stays for another pick
   notice_ = m["text"].as_string();
   double ttl = m["ttl_s"].as_number(8);
   notice_until_ = now() + static_cast<uint32_t>(std::max(1.0, ttl) * 1000);
@@ -786,6 +792,11 @@ void App::on_button(Button button, bool pressed) {
   if (settings_chord_fired_) {
     if (button == Button::Cancel) cancel_held_ = pressed;
     if (!talk_held_ && !cancel_held_) settings_chord_fired_ = false;
+    return;
+  }
+  if (menu_open()) {
+    menu_input(button, pressed);
+    update_model();
     return;
   }
   if (settings_open()) {
@@ -1269,6 +1280,7 @@ void App::tick() {
   const uint32_t t = now();
   power_tick();
   settings_tick();
+  menu_tick();
 
   if (phase_ == Phase::Boot && static_cast<int32_t>(t - boot_until_) >= 0) {
     phase_ = network_up_ ? Phase::Connecting : Phase::NoNetwork;
@@ -1508,6 +1520,8 @@ void App::update_model() {
     m.yes = profile_.touch_screen ? "Tap: Yes" : talk + ": Yes";
     if (profile_.has_cancel_button) m.no = profile_.touch_screen ? "Swipe: No" : profile_.cancel_label + ": No";
     m.hint = "Hermes is waiting for you";
+  } else if (menu_active_) {
+    menu_model();
   } else if (overlay_ == Overlay::Image) {
     m.screen = Screen::Image;
     m.headline = "Image";
@@ -1555,6 +1569,11 @@ void App::update_model() {
     if (m.hero) {
       m.headline = "Hi, I'm Hermes";
       m.detail = reply_.empty() || !profile_.has_scroll_buttons ? "Ask me anything" : "UP shows my last reply";
+      if (!info_model_.empty()) {  // what Hermes is running: model, then the conversation's title
+        m.detail += "\n" + info_model_;
+        if (!info_session_.empty()) m.detail += "\n" + info_session_;
+        m.caption_lines = info_session_.empty() ? 2 : 3;
+      }
     }
   }
   bool keeps_detail = m.screen == Screen::Pairing || m.screen == Screen::Boot || m.screen == Screen::Prompt;
@@ -1594,6 +1613,15 @@ json::Value App::status_value() const {
   if (hal_.power) s.set("power", power_value());
   if (!pairing_code_.empty()) s.set("pairing_code", pairing_code_);
   if (!prompt_id_.empty()) s.set("prompt", prompt_id_);
+  if (menu_active_) {
+    json::Value menu = json::Value::object(), items = json::Value::array();
+    for (const MenuEntry& e : menu_entries()) items.push(e.label);
+    menu.set("id", menu_id_).set("title", menu_title_).set("items", items).set("cursor", menu_cursor_)
+        .set("loading", menu_loading_);
+    s.set("menu", menu);
+  }
+  if (!info_model_.empty()) s.set("model", info_model_);
+  if (!info_session_.empty()) s.set("session", info_session_);
   if (!fatal_.empty()) s.set("error", fatal_);
   if (ota_ != Ota::Idle) {
     json::Value u = json::Value::object();
@@ -1641,7 +1669,7 @@ std::string App::console(std::string_view raw) {
     for (const char* k : kSettingKeys) keys += std::string(" ") + k;
     for (const auto& k : profile_.extra_settings) keys += " " + k;
     return "@help commands: status | diag [log] | get <key> | set <key> <value> | say <text> | talk | release | "
-           "cancel | new-session | settings [close] | wifi-setup [close] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
+           "cancel | new-session | menu [close|next|page|pick <n>] | settings [close] | wifi-setup [close] | yes | no | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "wifi-setup") {
@@ -1651,6 +1679,17 @@ std::string App::console(std::string_view raw) {
   if (cmd == "settings") {
     if (rest == "close") { close_settings(); return "@ok settings closed"; }
     return open_settings() ? "@ok settings" : "@error settings unavailable during a prompt or update";
+  }
+  if (cmd == "menu") {
+    if (rest.empty()) return open_menu() ? "@ok menu" : "@error menu unavailable";
+    if (rest == "close") { close_menu(); return "@ok menu closed"; }
+    if (!menu_active_) return "@error no menu open";
+    if (rest == "next") menu_move(+1);
+    else if (rest == "page") menu_page();
+    else if (rest.rfind("pick ", 0) == 0) menu_pick(std::atoi(rest.c_str() + 5));
+    else return "@error menu [close|next|page|pick <n>]";
+    update_model();
+    return "@ok menu " + rest;
   }
   if (cmd == "diag" && rest.empty()) return diag_report();
   if (cmd == "diag" && rest == "log") {

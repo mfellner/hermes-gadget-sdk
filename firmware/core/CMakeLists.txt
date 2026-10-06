@@ -1,6 +1,7 @@
 # Portable device core. Builds as an ESP-IDF component or a plain CMake library.
 set(HG_CORE_SOURCES
     src/app.cpp
+    src/app_menu.cpp
     src/app_settings.cpp
     src/app_power.cpp
     src/canvas.cpp

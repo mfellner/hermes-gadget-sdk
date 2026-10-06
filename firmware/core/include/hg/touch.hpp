@@ -6,6 +6,9 @@
 //   quick tap          a TALK press and release (answers "yes" to a question)
 //   swipe down         a CANCEL press and release (discard, close, stop, "no")
 //
+// On a menu, a tap picks the row under the finger, swipe down closes the menu
+// and swipe up shows its next rows.
+//
 // Feed it raw touch samples; it calls App::on_button. Portable and clock-free,
 // so the simulator and the tests drive it exactly like the firmware does.
 #pragma once

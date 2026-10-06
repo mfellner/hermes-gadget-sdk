@@ -97,6 +97,15 @@ class App {
   // Turns the screen off until the next input (a power key's short press).
   void sleep_display();
   bool display_sleeping() const { return display_sleeping_; }
+  // Hermes's own menu (status, model, sessions): asks the server for its lists.
+  bool open_menu();
+  void close_menu();
+  // A menu is on screen and takes the input (a question from Hermes goes first).
+  bool menu_open() const { return menu_active_ && !prompt_showing(); }
+  // Picks the menu row under a touch point; false when the point is on no row.
+  bool menu_tap(int x, int y);
+  // Shows the next screenful of menu rows (wrapping around).
+  void menu_page();
   bool start_wifi_setup();
   void close_wifi_setup();
   bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
@@ -161,6 +170,9 @@ class App {
   void h_error(const json::Value& m);
   void h_prompt(const json::Value& m);
   void h_prompt_close(const json::Value& m);
+  void h_menu(const json::Value& m);
+  void h_menu_close(const json::Value& m);
+  void h_info(const json::Value& m);
   void h_ota_offer(const json::Value& m);
   void h_ota_begin(const json::Value& m);
   void h_ota_end(const json::Value& m);
@@ -173,6 +185,17 @@ class App {
   void ota_reset();
   bool ota_busy() const;
 
+  struct MenuEntry {
+    std::string id, label, note;  // an empty id is the device's own "Close" row
+    bool current = false;
+  };
+  std::vector<MenuEntry> menu_entries() const;
+  void menu_input(Button button, bool pressed);
+  void menu_move(int delta);
+  void menu_pick(int index);
+  void menu_reset();
+  void menu_tick();
+  void menu_model();
   void load_settings();
   void settings_input(Button button, bool pressed);
   void settings_tick();
@@ -229,7 +252,7 @@ class App {
   TalkMode talk_mode_ = TalkMode::Hold;
   uint8_t volume_ = 70;
   uint8_t brightness_ = 100;
-  enum class Menu : uint8_t { Closed, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
+  enum class Menu : uint8_t { Closed, Hermes, Volume, Brightness, TalkMode, Microphone, Speaker, Display, Inputs, Info,
                               Power, IdleTimer, PowerOff, WifiSetup, Back };
   enum class HardwareCheck : uint8_t { None, Microphone, Speaker, Display, Inputs };
   Menu menu_ = Menu::Closed;
@@ -313,6 +336,15 @@ class App {
   size_t image_px_ = 0;
   std::vector<uint16_t> image_carry_;  // strip mode: received pixels not yet on the panel
   int image_row_ = 0;                  // strip mode: first image row in image_carry_
+
+  // Hermes's menu: the list on screen, and whether a pick is waiting for the server
+  bool menu_active_ = false, menu_loading_ = false;
+  uint32_t menu_wait_until_ = 0;
+  std::string menu_id_, menu_title_;
+  std::vector<MenuEntry> menu_items_;
+  int menu_cursor_ = 0, menu_top_ = 0;
+  // What Hermes reports for the idle screen (``info``): model and conversation
+  std::string info_model_, info_session_;
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;

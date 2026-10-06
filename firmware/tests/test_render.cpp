@@ -244,6 +244,33 @@ void run_session(RenderHal& hal, size_t image_chunk, const std::function<void(co
   app.console("settings close");
   advance(300);
   observe("settings-closed");
+  advance(9000);  // the error notice expires (later animated frames move with the clock)
+  server(R"({"type":"info","model":"claude-sonnet-5-5","session":"Weather plans"})");
+  advance(300);
+  observe("ready-info");
+  app.console("menu");
+  advance(300);
+  observe("menu-loading");
+  server(R"({"type":"menu","id":"m1","title":"Hermes","items":[{"id":"status","label":"Status","note":"busy"},)"
+         R"({"id":"model","label":"Model","note":"claude-sonnet-5-5"},{"id":"sessions","label":"Sessions",)"
+         R"("note":"Weather plans"},{"id":"new","label":"New session"}]})");
+  advance(300);
+  observe("menu");
+  {
+    std::string items;
+    for (int i = 0; i < 14; ++i)
+      items += std::string(i ? "," : "") + R"({"id":"s)" + std::to_string(i) + R"(","label":"A conversation about topic number )" +
+               std::to_string(i) + R"(","note":")" + std::to_string(i + 1) + R"(h")" + (i == 9 ? R"(,"current":true)" : "") + "}";
+    server((R"({"type":"menu","id":"m2","title":"Sessions","items":[)" + items + "]}").c_str());
+  }
+  advance(300);
+  observe("menu-long");
+  app.console("menu next");
+  advance(300);
+  observe("menu-moved");
+  server(R"({"type":"menu.close","id":"m2"})");
+  advance(300);
+  observe("menu-closed");
   app.on_transport_closed("lost");
   advance(500);
   observe("offline");
@@ -276,7 +303,8 @@ TEST("render: rectangular 320x240 session matches the pinned pixels") {
       0x2aca3ebbu, 0x2aca3ebbu, 0xd264717du, 0xcbc8e2afu, 0x1e67af83u, 0x738c6c8fu, 0xd264717du,
       0xdf2603e3u, 0xa0c079d6u, 0xed53c3f1u, 0xf1cd192au, 0xe704069eu, 0x0db5a385u, 0x50b7e389u,
       0x81182519u, 0x27aad381u, 0x3d296a2bu, 0xf904483du, 0x9cd3e865u, 0x3571e0bcu, 0x113167d4u,
-      0xa1e24fbcu, 0x9ed5ec87u, 0x9ed5ec87u, 0x824af1e4u, 0xa233fe39u, 0x79751efau
+      0xa1e24fbcu, 0x9ed5ec87u, 0x9ed5ec87u, 0x56b9ddbcu, 0xa233fe39u, 0x7d1e5a39u, 0x272f6417u,
+      0xaf2c6417u, 0xfff62a27u, 0x02f2067eu, 0xb80a5861u, 0x2ea27f15u
                });
 }
 
@@ -288,7 +316,8 @@ TEST("render: round 466 session matches the pinned pixels") {
       0xe11af4b1u, 0xe11af4b1u, 0xf77d2b12u, 0xa5f774c6u, 0xde132a0au, 0xbd7c3d3au, 0xf77d2b12u,
       0x0d216f82u, 0x711d6a6cu, 0x567401f7u, 0x2d95bc70u, 0xee66d664u, 0x33193c71u, 0xac9cc72du,
       0xf7f85391u, 0x0f0e90cdu, 0xaef02f06u, 0x914ba318u, 0x914ba318u, 0xf52d7121u, 0x9e9c5389u,
-      0x20bae321u, 0x0820eff0u, 0x0820eff0u, 0xb5bb87cdu, 0xa67fd05cu, 0x1568d8bbu
+      0x20bae321u, 0x0820eff0u, 0x0820eff0u, 0x925e2d75u, 0xa67fd05cu, 0xe4f4645cu, 0xec88e7bau,
+      0xbc67895au, 0x2a3f4f22u, 0x1583e723u, 0x409eb55cu, 0x727dd364u
                });
 }
 
@@ -300,7 +329,8 @@ TEST("render: square 480x480 session matches the pinned pixels") {
       0x5f86a42du, 0x5f86a42du, 0xe91dbe22u, 0x0c2a742eu, 0xd76e692au, 0xaa44276au, 0xe91dbe22u,
       0x5fac3f2au, 0x91949bd5u, 0x629f78b2u, 0x7a5e6029u, 0xf309694du, 0xc0a2f345u, 0x8354b9b9u,
       0xbd7bd8f5u, 0xc1be2f89u, 0x6aac9baeu, 0xe97fe054u, 0xe97fe054u, 0x0487989fu, 0x265d620eu,
-      0x2329abd7u, 0x73e85ce9u, 0x73e85ce9u, 0xa19de6c1u, 0x81cf77ebu, 0x1f4553afu
+      0x2329abd7u, 0x73e85ce9u, 0x73e85ce9u, 0x469b0a26u, 0x81cf77ebu, 0xa90621cbu, 0x23be8b25u,
+      0x23974487u, 0x70f44a14u, 0x9d142867u, 0x0d3c8253u, 0xe5332897u
                });
 }
 
@@ -312,7 +342,8 @@ TEST("render: small 240x240 session matches the pinned pixels") {
       0x98109559u, 0x98109559u, 0x17a3c62eu, 0x95d2c89au, 0x44cde5f6u, 0x7f6fb0d6u, 0x17a3c62eu,
       0x91453856u, 0x3b959769u, 0x00efe3c6u, 0xcae0630du, 0x45e25fc1u, 0xa8e38869u, 0xd320839du,
       0xaf097f59u, 0xaff3592du, 0xb621436au, 0x54e3995cu, 0x54e3995cu, 0xcafa892cu, 0x49292419u,
-      0x0ec45794u, 0x0fccd2edu, 0x0fccd2edu, 0xda8903b5u, 0x6b82d4fbu, 0x960e4bbbu
+      0x0ec45794u, 0x0fccd2edu, 0x0fccd2edu, 0x63045156u, 0x6b82d4fbu, 0xfd050dbbu, 0xe6c77e09u,
+      0x27afb51fu, 0x9ee331c8u, 0x7d0b2a3cu, 0xf39d08fbu, 0xb690e383u
                });
 }
 
