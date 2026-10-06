@@ -88,6 +88,7 @@ typedef struct hgsim_config {
   int update_pending;     /* this boot runs an installed update that isn't confirmed yet */
   int strip_rows;         /* > 0: draw like a board without a framebuffer (see hg::DisplayInfo) */
   int row_align;          /* strip/window row granularity; 0 or 1 = none */
+  int inset;              /* pixels hidden at each edge of a rectangular panel (see hg::DisplayInfo) */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an

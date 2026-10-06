@@ -27,6 +27,7 @@ class SimHal final : public hg::Display,
     info_.has_backlight = cfg.has_backlight != 0;
     info_.round = cfg.round != 0;
     info_.row_align = static_cast<uint8_t>(cfg.row_align > 1 ? cfg.row_align : 1);
+    info_.inset = static_cast<uint8_t>(cfg.inset > 0 && cfg.inset < 64 ? cfg.inset : 0);
     if (cfg.strip_rows > 0) {
       info_.strip_rows = static_cast<uint16_t>(std::min(cfg.strip_rows, std::max(cfg.height, 1)));
       strip_.resize(static_cast<size_t>(cfg.width) * info_.strip_rows);

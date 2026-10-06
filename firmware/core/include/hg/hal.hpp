@@ -26,6 +26,10 @@ struct DisplayInfo {
   // A circular panel (width == height). The UI keeps to the square inscribed
   // in the circle and leaves the rest dark.
   bool round = false;
+  // A rectangular panel whose glass hides its edges (rounded corners): the UI
+  // keeps this many pixels clear on every side and leaves them dark. Text keeps
+  // the scale of the whole panel.
+  uint8_t inset = 0;
   // Non-zero: the port has no framebuffer and the UI draws the panel in
   // horizontal strips of at most this many rows (see Display::strip()).
   uint16_t strip_rows = 0;

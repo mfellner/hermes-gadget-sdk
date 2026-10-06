@@ -147,6 +147,10 @@ Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(pane
     ox_ = (panel_.width - side) / 2;
     oy_ = (panel_.height - side) / 2;
     info_.width = info_.height = static_cast<uint16_t>(side);
+  } else if (panel_.inset) {
+    ox_ = oy_ = panel_.inset;
+    info_.width = static_cast<uint16_t>(std::max(0, panel_.width - 2 * panel_.inset));
+    info_.height = static_cast<uint16_t>(std::max(0, panel_.height - 2 * panel_.inset));
   }
   align_ = std::max<int>(1, panel_.row_align);
   if (align_ > 1) {
@@ -157,7 +161,9 @@ Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(pane
   }
   auto aligned = [&](int v) { return (v + align_ - 1) / align_ * align_; };
   int w = info_.width, h = info_.height;
-  int s = std::max(1, std::min(4, std::min(w / 160, h / 120)));
+  // An inset only keeps content off hidden edges; it does not shrink the text.
+  const int sw = panel_.inset ? panel_.width : w, sh = panel_.inset ? panel_.height : h;
+  int s = std::max(1, std::min(4, std::min(sw / 160, sh / 120)));
   layout_.scale = s;
   layout_.top_h = aligned(Canvas::line_height(s) + 2 * s);
   layout_.bottom_h = layout_.top_h;

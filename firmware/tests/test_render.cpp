@@ -19,6 +19,7 @@ struct Panel {
   bool round;
   int row_align = 1;
   int strip_rows = 0;  // 0: framebuffer display
+  int inset = 0;
 };
 
 constexpr uint16_t kPoison = 0xF81F;  // what a strip holds before the UI draws it
@@ -66,6 +67,7 @@ struct RenderHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::St
     d.round = panel.round;
     d.swap_bytes = true;
     d.row_align = static_cast<uint8_t>(panel.row_align);
+    d.inset = static_cast<uint8_t>(panel.inset);
     d.strip_rows = static_cast<uint16_t>(panel.strip_rows);
     return d;
   }
@@ -370,4 +372,29 @@ TEST("render: row alignment only moves band edges onto even rows") {
   CHECK_EQ(a.layout().scale, b.layout().scale);
   CHECK(b.layout().top_h % 2 == 0 && b.layout().header_h % 2 == 0 && b.layout().bottom_h % 2 == 0);
   CHECK(b.layout().main_y % 2 == 0 && b.layout().main_h % 2 == 0);
+}
+
+TEST("render: an inset keeps a dark frame and the panel's text scale") {
+  Panel p{480, 480, false, 2, 0, 16};
+  RenderHal plain({480, 480, false, 2}), inset(p);
+  hg::Ui a(plain), b(inset);
+  CHECK_EQ(b.layout().scale, a.layout().scale);
+  CHECK_EQ(static_cast<int>(b.area().width), 448);
+  CHECK(!b.title_hit(10, 20) && b.title_hit(20, 20));
+  RenderHal hal(p);
+  bool framed = true;
+  run_session(hal, 4096, [&](const char*) {
+    const uint16_t bg = hal.fb[0];
+    for (int i = 0; i < 480; ++i) {
+      for (int d : {0, 15}) {
+        framed &= hal.fb[static_cast<size_t>(d * 480 + i)] == bg && hal.fb[static_cast<size_t>((479 - d) * 480 + i)] == bg &&
+                  hal.fb[static_cast<size_t>(i * 480 + d)] == bg && hal.fb[static_cast<size_t>(i * 480 + 479 - d)] == bg;
+      }
+    }
+  });
+  CHECK(framed);
+}
+
+TEST("render: strips reproduce the framebuffer with an inset") {
+  check_strips_match({480, 480, false, 2, 0, 16}, {2, 24}, {4096, 778});
 }

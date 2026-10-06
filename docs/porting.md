@@ -67,6 +67,8 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 
 **Round panels** (for example a 1.75" 466×466 AMOLED): set `round = true`. The UI then draws inside the square inscribed in the circle, keeps everything else dark, centres the status row, and tells the host `"shape": "round"`. Try it with the `sim-466x466-round` simulator board.
 
+**Panels with hidden edges** (rounded glass on a square panel): set `inset` in `info()` to the number of pixels to keep clear on each side. The UI draws inside the inset, keeps the frame dark, and keeps the text scale of the whole panel.
+
 **Boards without PSRAM** (strip mode): a full frame does not fit in internal RAM (480×480 RGB565 is 450 KiB). Set `strip_rows` in `info()` and return `nullptr` from `framebuffer()`. The UI then draws each changed band in horizontal strips: `strip(y0)` returns a full-width buffer for up to `strip_rows` rows starting at panel row `y0`, the UI redraws every pixel of those rows, and `present(y0, y1)` sends them. `flush()` is not called. Images stream straight to the panel row by row, so the panel's own memory holds them. A panel that only accepts even windows sets `row_align = 2`; band edges, images and strips then start and end on even rows. Double-buffer the strips so the next one is drawn while the previous one is still transmitting. The output is pixel-identical to framebuffer rendering with the same `row_align` (`firmware/tests/test_render.cpp`).
 
 - **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.

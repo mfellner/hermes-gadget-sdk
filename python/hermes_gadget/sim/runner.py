@@ -41,6 +41,7 @@ class Board:
     touch: bool = False  # touchscreen: hold to talk, tap to answer yes, swipe down to cancel
     strip_rows: int = 0  # no framebuffer: the UI draws in strips of this many rows (boards without PSRAM)
     row_align: int = 1  # panel windows start and end on multiples of this row count
+    inset: int = 0  # pixels the glass hides on each edge (rounded corners); the UI keeps them dark
 
 
 BOARDS = {
@@ -55,7 +56,7 @@ BOARDS = {
     # A 2.16" 480x480 AMOLED touch board without PSRAM (Waveshare ESP32-C6-Touch-AMOLED-2.16): drawn in
     # 24-row strips with even windows, as on the hardware. No scroll buttons.
     "sim-480x480-strip": Board("sim-480x480-strip", 480, 480, scroll_buttons=False, touch=True,
-                               strip_rows=24, row_align=2),
+                               strip_rows=24, row_align=2, inset=16),
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),
@@ -168,7 +169,7 @@ class Simulator:
             server_url=url, access_token=token, mic=b.mic, speaker=b.speaker, backlight=b.backlight,
             scroll_buttons=b.scroll_buttons, library=library, button_labels=button_labels,
             round_panel=b.round, touch_screen=b.touch, update_capacity=UPDATE_SLOT_BYTES,
-            update_pending=update_pending, strip_rows=b.strip_rows, row_align=b.row_align)
+            update_pending=update_pending, strip_rows=b.strip_rows, row_align=b.row_align, inset=b.inset)
         self._round_spans = _circle_spans(b.width, b.height) if b.round else None
         self._register_actions()
 
