@@ -39,6 +39,8 @@ class Board:
     scroll_buttons: bool = True
     round: bool = False  # circular panel: pixels outside the circle are not shown
     touch: bool = False  # touchscreen: hold to talk, tap to answer yes, swipe down to cancel
+    strip_rows: int = 0  # no framebuffer: the UI draws in strips of this many rows (boards without PSRAM)
+    row_align: int = 1  # panel windows start and end on multiples of this row count
 
 
 BOARDS = {
@@ -50,6 +52,10 @@ BOARDS = {
     "sim-240x240": Board("sim-240x240", 240, 240, scroll_buttons=False),
     # A 1.75" round 466x466 AMOLED touch board (e.g. ESP32-S3-Touch-AMOLED-1.75): no scroll buttons.
     "sim-466x466-round": Board("sim-466x466-round", 466, 466, scroll_buttons=False, round=True, touch=True),
+    # A 2.16" 480x480 AMOLED touch board without PSRAM (Waveshare ESP32-C6-Touch-AMOLED-2.16): drawn in
+    # 24-row strips with even windows, as on the hardware. No scroll buttons.
+    "sim-480x480-strip": Board("sim-480x480-strip", 480, 480, scroll_buttons=False, touch=True,
+                               strip_rows=24, row_align=2),
     # A 1.9" 320x170 board with no audio hardware (e.g. LilyGO T-Display-S3).
     "sim-320x170-nospeaker": Board("sim-320x170-nospeaker", 320, 170, mic=False, speaker=False,
                                    scroll_buttons=False),
@@ -162,7 +168,7 @@ class Simulator:
             server_url=url, access_token=token, mic=b.mic, speaker=b.speaker, backlight=b.backlight,
             scroll_buttons=b.scroll_buttons, library=library, button_labels=button_labels,
             round_panel=b.round, touch_screen=b.touch, update_capacity=UPDATE_SLOT_BYTES,
-            update_pending=update_pending)
+            update_pending=update_pending, strip_rows=b.strip_rows, row_align=b.row_align)
         self._round_spans = _circle_spans(b.width, b.height) if b.round else None
         self._register_actions()
 

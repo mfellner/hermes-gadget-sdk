@@ -22,7 +22,7 @@ extern "C" {
 #define HGSIM_API __attribute__((visibility("default")))
 #endif
 
-#define HGSIM_ABI_VERSION 5
+#define HGSIM_ABI_VERSION 6
 
 typedef struct hgsim hgsim;
 
@@ -86,6 +86,8 @@ typedef struct hgsim_config {
   int touch; /* the screen is the main input (see hg::TouchGestures) */
   size_t update_capacity; /* bytes the update slot holds; 0 = no over-the-air updates */
   int update_pending;     /* this boot runs an installed update that isn't confirmed yet */
+  int strip_rows;         /* > 0: draw like a board without a framebuffer (see hg::DisplayInfo) */
+  int row_align;          /* strip/window row granularity; 0 or 1 = none */
 } hgsim_config;
 
 /* Action handler: fill `result_json` (a JSON object) and return 1, or write an
@@ -120,7 +122,7 @@ HGSIM_API int hgsim_console(hgsim* sim, const char* line, char* out, size_t cap)
 /* Current status as JSON (same as the console "status" command). */
 HGSIM_API int hgsim_status(hgsim* sim, char* out, size_t cap);
 HGSIM_API const char* hgsim_screen(hgsim* sim);
-/* RGB565, native byte order, width*height pixels. */
+/* RGB565, native byte order, width*height pixels: what the panel shows. */
 HGSIM_API const uint16_t* hgsim_framebuffer(hgsim* sim, int* width, int* height);
 
 #ifdef __cplusplus
