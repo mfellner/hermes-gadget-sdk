@@ -58,13 +58,16 @@ Implement `hg::Display` (`firmware/core/include/hg/hal.hpp`):
 | Method | What it must do |
 |---|---|
 | `info()` | Width, height, whether to store pixels byte-swapped (most SPI panels want big-endian RGB565, so return `swap_bytes = true`), whether a backlight can be dimmed, and whether the panel is `round` |
-| `framebuffer()` | A width × height RGB565 buffer you own (PSRAM on ESP32) |
+| `framebuffer()` | A width × height RGB565 buffer you own (PSRAM on ESP32), or `nullptr` in strip mode |
 | `flush(y0, y1)` | Push full-width rows `[y0, y1)` to the panel |
+| `strip(y0)` / `present(y0, y1)` | Strip mode only (no framebuffer): see below |
 | `set_backlight(percent)` | Optional |
 
 `SpiDisplay` in `port_display.cpp` is the reference. To add ILI9341, GC9A01 or another panel, swap `esp_lcd_new_panel_st7789` for the matching `esp_lcd` driver (most are managed components). For RGB/parallel or QSPI AMOLED panels, the same interface applies with that panel's `esp_lcd` IO.
 
 **Round panels** (for example a 1.75" 466×466 AMOLED): set `round = true`. The UI then draws inside the square inscribed in the circle, keeps everything else dark, centres the status row, and tells the host `"shape": "round"`. Try it with the `sim-466x466-round` simulator board.
+
+**Boards without PSRAM** (strip mode): a full frame does not fit in internal RAM (480×480 RGB565 is 450 KiB). Set `strip_rows` in `info()` and return `nullptr` from `framebuffer()`. The UI then draws each changed band in horizontal strips: `strip(y0)` returns a full-width buffer for up to `strip_rows` rows starting at panel row `y0`, the UI redraws every pixel of those rows, and `present(y0, y1)` sends them. `flush()` is not called. Images stream straight to the panel row by row, so the panel's own memory holds them. A panel that only accepts even windows sets `row_align = 2`; band edges, images and strips then start and end on even rows. Double-buffer the strips so the next one is drawn while the previous one is still transmitting. The output is pixel-identical to framebuffer rendering with the same `row_align` (`firmware/tests/test_render.cpp`).
 
 - **Monochrome or e-paper:** convert RGB565 to your format in `flush()`. The UI uses dark backgrounds with light text and accents, so thresholding the luminance works.
 - **Very small screens** (128×64): the layout scales text to 1×. You may want a slimmer layout; `Ui` reads only `DisplayInfo`.

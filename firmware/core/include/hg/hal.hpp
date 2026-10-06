@@ -26,16 +26,36 @@ struct DisplayInfo {
   // A circular panel (width == height). The UI keeps to the square inscribed
   // in the circle and leaves the rest dark.
   bool round = false;
+  // Non-zero: the port has no framebuffer and the UI draws the panel in
+  // horizontal strips of at most this many rows (see Display::strip()).
+  uint16_t strip_rows = 0;
+  // Strip mode: rows are sent in multiples of this (panels that need even
+  // windows use 2). The layout keeps band edges on these boundaries.
+  uint8_t row_align = 1;
 };
 
-// A full-frame RGB565 framebuffer owned by the port (PSRAM on hardware).
+// A full-frame RGB565 framebuffer owned by the port (PSRAM on hardware), or,
+// when DisplayInfo::strip_rows is set, a small strip buffer the UI fills and
+// presents piece by piece (boards without PSRAM).
 class Display {
  public:
   virtual ~Display() = default;
   virtual DisplayInfo info() const = 0;
+  // The whole frame; nullptr in strip mode.
   virtual uint16_t* framebuffer() = 0;
   // Push rows [y0, y1) to the panel. Rows are contiguous in the framebuffer.
   virtual void flush(uint16_t y0, uint16_t y1) = 0;
+  // Strip mode: a full-width buffer for strip_rows rows whose first row is
+  // panel row y0. Its previous contents are undefined; the UI redraws every
+  // pixel of the rows it presents.
+  virtual uint16_t* strip(uint16_t y0) {
+    (void)y0;
+    return nullptr;
+  }
+  // Strip mode: sends rows [y0, y1) of the buffer strip(y0) returned. The port
+  // may still be transmitting when this returns, but must not let a later
+  // strip() hand out memory that is still in flight.
+  virtual void present(uint16_t y0, uint16_t y1) { flush(y0, y1); }
   virtual void set_backlight(uint8_t percent) { (void)percent; }
 };
 

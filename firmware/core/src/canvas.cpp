@@ -7,22 +7,22 @@
 namespace hg {
 
 void Canvas::set_clip_rows(int y0, int y1) {
-  clip_y0_ = std::max(0, y0);
-  clip_y1_ = std::min(h_, y1);
+  clip_y0_ = std::max(std::max(0, row0_), y0);
+  clip_y1_ = std::min(std::min(h_, row1_), y1);
 }
 
 void Canvas::pixel(int x, int y, uint16_t color) {
-  if (x < 0 || x >= w_ || y < clip_y0_ || y >= clip_y1_ || y >= h_) return;
-  px_[y * stride_ + x] = encode(color);
+  if (x < 0 || x >= w_ || y < clip_y0_ || y >= clip_y1_) return;
+  *at(x, y) = encode(color);
 }
 
 void Canvas::fill_rect(int x, int y, int w, int h, uint16_t color) {
   int x0 = std::max(0, x), x1 = std::min(w_, x + w);
-  int y0 = std::max(clip_y0_, y), y1 = std::min(std::min(h_, clip_y1_), y + h);
+  int y0 = std::max(clip_y0_, y), y1 = std::min(clip_y1_, y + h);
   if (x0 >= x1 || y0 >= y1) return;
   uint16_t c = encode(color);
   for (int yy = y0; yy < y1; ++yy) {
-    std::fill(px_ + yy * stride_ + x0, px_ + yy * stride_ + x1, c);
+    std::fill(at(x0, yy), at(x1, yy), c);
   }
 }
 
@@ -51,7 +51,8 @@ void Canvas::fill_round_rect(int x, int y, int w, int h, int r, uint16_t color) 
 }
 
 void Canvas::fill_circle(int cx, int cy, int r, uint16_t color) {
-  for (int dy = -r; dy <= r; ++dy) {
+  // Only rows inside the clip can change; skipping the rest keeps strips cheap.
+  for (int dy = std::max(-r, clip_y0_ - cy), last = std::min(r, clip_y1_ - 1 - cy); dy <= last; ++dy) {
     int dx = 0;
     while ((dx + 1) * (dx + 1) + dy * dy <= r * r) ++dx;
     fill_rect(cx - dx, cy + dy, 2 * dx + 1, 1, color);
@@ -60,7 +61,7 @@ void Canvas::fill_circle(int cx, int cy, int r, uint16_t color) {
 
 void Canvas::ring(int cx, int cy, int r, int thickness, uint16_t color) {
   int inner = std::max(0, r - thickness);
-  for (int dy = -r; dy <= r; ++dy) {
+  for (int dy = std::max(-r, clip_y0_ - cy), last = std::min(r, clip_y1_ - 1 - cy); dy <= last; ++dy) {
     for (int dx = -r; dx <= r; ++dx) {
       int d2 = dx * dx + dy * dy;
       if (d2 <= r * r && d2 > inner * inner) pixel(cx + dx, cy + dy, color);
@@ -70,7 +71,7 @@ void Canvas::ring(int cx, int cy, int r, int thickness, uint16_t color) {
 
 void Canvas::arc(int cx, int cy, int r, int thickness, int dir, uint16_t color) {
   int inner = std::max(0, r - thickness);
-  for (int dy = -r; dy <= r; ++dy) {
+  for (int dy = std::max(-r, clip_y0_ - cy), last = std::min(r, clip_y1_ - 1 - cy); dy <= last; ++dy) {
     int ady = dy < 0 ? -dy : dy;
     for (int dx = -r; dx <= r; ++dx) {
       int d2 = dx * dx + dy * dy;
@@ -84,19 +85,22 @@ void Canvas::arc(int cx, int cy, int r, int thickness, int dir, uint16_t color) 
 void Canvas::bitmap1(int x, int y, int w, int h, const uint8_t* bits, uint16_t color) {
   const int stride = (w + 7) / 8;
   const uint16_t c = encode(color);
-  int y0 = std::max(y, clip_y0_), y1 = std::min(std::min(h_, clip_y1_), y + h);
+  int y0 = std::max(y, clip_y0_), y1 = std::min(clip_y1_, y + h);
   for (int yy = y0; yy < y1; ++yy) {
     const uint8_t* row = bits + (yy - y) * stride;
     for (int col = 0; col < w; ++col) {
       int xx = x + col;
       if (xx < 0 || xx >= w_) continue;
-      if ((row[col >> 3] >> (7 - (col & 7))) & 1) px_[yy * stride_ + xx] = c;
+      if ((row[col >> 3] >> (7 - (col & 7))) & 1) *at(xx, yy) = c;
     }
   }
 }
 
 int Canvas::text(int x, int y, std::string_view s, int scale, uint16_t color) {
   if (scale < 1) scale = 1;
+  if (y >= clip_y1_ || y + font::kGlyphHeight * scale <= clip_y0_) {
+    return x + static_cast<int>(s.size()) * font::kCellWidth * scale;  // nothing visible
+  }
   for (char ch : s) {
     const char* g = font::glyph(ch);
     for (int row = 0; row < font::kGlyphHeight; ++row) {
@@ -121,11 +125,11 @@ int Canvas::line_height(int scale) { return font::kCellHeight * scale; }
 void Canvas::blit(int x, int y, int w, int h, const uint16_t* src) {
   for (int row = 0; row < h; ++row) {
     int yy = y + row;
-    if (yy < clip_y0_ || yy >= clip_y1_ || yy >= h_ || yy < 0) continue;
+    if (yy < clip_y0_ || yy >= clip_y1_) continue;
     for (int col = 0; col < w; ++col) {
       int xx = x + col;
       if (xx < 0 || xx >= w_) continue;
-      px_[yy * stride_ + xx] = encode(src[row * w + col]);
+      *at(xx, yy) = encode(src[row * w + col]);
     }
   }
 }

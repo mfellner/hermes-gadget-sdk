@@ -17,13 +17,22 @@ namespace {
 struct Panel {
   int width, height;
   bool round;
+  int row_align = 1;
+  int strip_rows = 0;  // 0: framebuffer display
 };
 
+constexpr uint16_t kPoison = 0xF81F;  // what a strip holds before the UI draws it
+
 struct RenderHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Storage, hg::System {
-  explicit RenderHal(Panel p) : panel(p), fb(static_cast<size_t>(p.width * p.height), 0) {}
+  explicit RenderHal(Panel p) : panel(p), fb(static_cast<size_t>(p.width * p.height), 0) {
+    if (p.strip_rows) strip_buf.assign(static_cast<size_t>(p.width * p.strip_rows), kPoison);
+  }
 
   Panel panel;
   std::vector<uint16_t> fb;  // what the panel shows
+  std::vector<uint16_t> strip_buf;
+  int strip_y = -1;          // panel row of the strip handed out, -1 when none
+  int strips = 0, bad_presents = 0;
 
   // System
   uint32_t clock = 1000;
@@ -56,10 +65,31 @@ struct RenderHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::St
     d.height = static_cast<uint16_t>(panel.height);
     d.round = panel.round;
     d.swap_bytes = true;
+    d.row_align = static_cast<uint8_t>(panel.row_align);
+    d.strip_rows = static_cast<uint16_t>(panel.strip_rows);
     return d;
   }
-  uint16_t* framebuffer() override { return fb.data(); }
-  void flush(uint16_t, uint16_t) override {}
+  uint16_t* framebuffer() override { return panel.strip_rows ? nullptr : fb.data(); }
+  void flush(uint16_t, uint16_t) override {
+    if (panel.strip_rows) ++bad_presents;  // strip displays are never flushed
+  }
+  uint16_t* strip(uint16_t y0) override {
+    if (!panel.strip_rows) return nullptr;
+    std::fill(strip_buf.begin(), strip_buf.end(), kPoison);  // stale contents must never show
+    strip_y = y0;
+    ++strips;
+    return strip_buf.data();
+  }
+  void present(uint16_t y0, uint16_t y1) override {
+    const int a = panel.row_align;
+    if (!panel.strip_rows || y0 != strip_y || y1 <= y0 || y1 - y0 > panel.strip_rows || y0 % a ||
+        (y1 % a && y1 != panel.height) || y1 > panel.height) {
+      ++bad_presents;
+      return;
+    }
+    std::copy(strip_buf.begin(), strip_buf.begin() + (y1 - y0) * panel.width, fb.begin() + y0 * panel.width);
+    strip_y = -1;
+  }
 
   // Audio
   bool start(uint32_t) override { return true; }
@@ -282,4 +312,62 @@ TEST("render: small 240x240 session matches the pinned pixels") {
       0xaf097f59u, 0xaff3592du, 0xb621436au, 0x54e3995cu, 0x54e3995cu, 0xcafa892cu, 0x49292419u,
       0x0ec45794u, 0x0fccd2edu, 0x0fccd2edu, 0xda8903b5u, 0x6b82d4fbu, 0x960e4bbbu
                });
+}
+
+namespace {
+
+// Every frame of the session drawn in strips must equal the framebuffer
+// rendering with the same row alignment, pixel for pixel.
+void check_strips_match(Panel p, std::initializer_list<int> strip_rows, std::initializer_list<size_t> chunks) {
+  RenderHal ref(p);
+  std::vector<std::vector<uint16_t>> frames;
+  std::vector<std::string> names;
+  run_session(ref, 4096, [&](const char* name) {
+    frames.push_back(ref.fb);
+    names.emplace_back(name);
+  });
+  for (int rows : strip_rows) {
+    for (size_t chunk : chunks) {
+      Panel sp = p;
+      sp.strip_rows = rows;
+      RenderHal hal(sp);
+      size_t step = 0;
+      int mismatches = 0;
+      run_session(hal, chunk, [&](const char* name) {
+        if (step < frames.size() && hal.fb != frames[step] && mismatches++ == 0) {
+          std::printf("  %dx%d%s align %d strips %d chunk %zu: first difference at step %zu (%s)\n", p.width, p.height,
+                      p.round ? " round" : "", p.row_align, rows, chunk, step, name);
+        }
+        ++step;
+      });
+      CHECK_EQ(step, frames.size());
+      CHECK_EQ(mismatches, 0);
+      CHECK_EQ(hal.bad_presents, 0);
+      CHECK(hal.strips > 0);
+    }
+  }
+}
+
+}  // namespace
+
+TEST("render: strips reproduce the framebuffer on a 480x480 panel with even windows") {
+  check_strips_match({480, 480, false, 2}, {2, 8, 24, 480}, {4096, 1000, 778});
+}
+
+TEST("render: strips reproduce the framebuffer with odd strip heights and no alignment") {
+  check_strips_match({320, 240, false, 1}, {1, 7, 24}, {4096, 778});
+  check_strips_match({240, 240, false, 1}, {13}, {1000});
+}
+
+TEST("render: strips keep a round panel's border dark") {
+  check_strips_match({466, 466, true, 2}, {2, 24}, {4096, 778});
+}
+
+TEST("render: row alignment only moves band edges onto even rows") {
+  // With alignment 1 a 480x480 layout is unchanged; with 2 every band edge is even.
+  RenderHal plain({480, 480, false, 1}), even({480, 480, false, 2});
+  hg::Ui a(plain), b(even);
+  CHECK_EQ(a.layout().scale, b.layout().scale);
+  CHECK(b.layout().top_h % 2 == 0 && b.layout().header_h % 2 == 0 && b.layout().bottom_h % 2 == 0);
+  CHECK(b.layout().main_y % 2 == 0 && b.layout().main_h % 2 == 0);
 }

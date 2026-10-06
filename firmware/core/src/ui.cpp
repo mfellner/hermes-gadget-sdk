@@ -148,12 +148,20 @@ Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(pane
     oy_ = (panel_.height - side) / 2;
     info_.width = info_.height = static_cast<uint16_t>(side);
   }
+  align_ = std::max<int>(1, panel_.row_align);
+  if (align_ > 1) {
+    // Rows go to the panel in whole alignment units, so the area and every
+    // band start on one: a strip then never mixes two bands.
+    oy_ -= oy_ % align_;
+    info_.height = static_cast<uint16_t>(info_.height / align_ * align_);
+  }
+  auto aligned = [&](int v) { return (v + align_ - 1) / align_ * align_; };
   int w = info_.width, h = info_.height;
   int s = std::max(1, std::min(4, std::min(w / 160, h / 120)));
   layout_.scale = s;
-  layout_.top_h = Canvas::line_height(s) + 2 * s;
+  layout_.top_h = aligned(Canvas::line_height(s) + 2 * s);
   layout_.bottom_h = layout_.top_h;
-  layout_.header_h = Canvas::line_height(s + 1) + 4 * s;
+  layout_.header_h = aligned(Canvas::line_height(s + 1) + 4 * s);
   layout_.main_y = layout_.top_h;
   layout_.main_h = h - layout_.top_h - layout_.bottom_h;
   int margin = 4 * s;
@@ -176,15 +184,41 @@ void Ui::flush(int y0, int y1) {
   display_.flush(static_cast<uint16_t>(y0 + oy_), static_cast<uint16_t>(y1 + oy_));
 }
 
+void Ui::paint_panel_background() {
+  if (!strips()) {
+    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
+    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
+    display_.flush(0, panel_.height);
+    return;
+  }
+  for (int y = 0; y < panel_.height; y += panel_.strip_rows) {
+    const int n = std::min<int>(panel_.strip_rows, panel_.height - y);
+    uint16_t* buf = display_.strip(static_cast<uint16_t>(y));
+    if (!buf) return;
+    Canvas panel(buf, panel_.width, panel_.height, panel_.swap_bytes, panel_.width, y, n);
+    panel.fill_rect(0, y, panel_.width, n, kBg);
+    display_.present(static_cast<uint16_t>(y), static_cast<uint16_t>(y + n));
+  }
+}
+
+void Ui::paint_border(uint16_t* buf, int y, int rows) {
+  Canvas panel(buf, panel_.width, panel_.height, panel_.swap_bytes, panel_.width, y, rows);
+  for (int yy = y; yy < y + rows; ++yy) {
+    if (yy < oy_ || yy >= oy_ + info_.height) {
+      panel.fill_rect(0, yy, panel_.width, 1, kBg);
+    } else {
+      panel.fill_rect(0, yy, ox_, 1, kBg);
+      panel.fill_rect(ox_ + info_.width, yy, panel_.width - ox_ - info_.width, 1, kBg);
+    }
+  }
+}
+
 void Ui::render(const UiModel& m) {
   const int h = info_.height;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
-    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
-    display_.flush(0, panel_.height);
+    paint_panel_background();
   }
-  Canvas c = canvas();
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
@@ -206,10 +240,10 @@ void Ui::render(const UiModel& m) {
     for (int i : {0, 3}) {
       if (valid_ && hash_[i] == hashes[i]) continue;
       int y0 = i == 0 ? 0 : y_bottom, y1 = i == 0 ? y_header : h;
-      c.set_clip_rows(y0, y1);
-      if (i == 0) draw_top(c, m);
-      else draw_bottom(c, m);
-      flush(y0, y1);
+      paint(y0, y1, [&](Canvas& c) {
+        if (i == 0) draw_top(c, m);
+        else draw_bottom(c, m);
+      });
       hash_[i] = hashes[i];
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines).get();
@@ -220,11 +254,7 @@ void Ui::render(const UiModel& m) {
       hero_anim_rows(m, y0, y1);  // only what can move
       redraw = true;
     }
-    if (redraw) {
-      c.set_clip_rows(y0, y1);
-      draw_hero(c, m);
-      flush(y0, y1);
-    }
+    if (redraw) paint(y0, y1, [&](Canvas& c) { draw_hero(c, m); });
     hero_static_ = stat;
     hero_anim_ = anim;
     hero_valid_ = true;
@@ -251,9 +281,7 @@ void Ui::render(const UiModel& m) {
       continue;
     }
     if (valid_ && hash_[i] == hashes[i]) continue;
-    c.set_clip_rows(bands[i].y0, bands[i].y1);
-    (this->*bands[i].draw)(c, m);
-    flush(bands[i].y0, bands[i].y1);
+    paint(bands[i].y0, bands[i].y1, [&](Canvas& c) { (this->*bands[i].draw)(c, m); });
     hash_[i] = hashes[i];
   }
   valid_ = true;

@@ -16,6 +16,13 @@ bool App::wake_display() {
   return sleeping;
 }
 
+void App::sleep_display() {
+  if (!hal_.display || display_sleeping_) return;
+  display_sleeping_ = true;
+  display_dimmed_ = false;
+  hal_.display->set_backlight(0);
+}
+
 void App::power_tick() {
   if (hal_.power && (!power_read_at_ || now() - power_read_at_ >= 5000)) {
     power_status_ = hal_.power->read();

@@ -260,7 +260,7 @@ void App::drop_session(std::string_view reason) {
   stop_playback();
   mode_ = Mode::Idle;
   overlay_ = Overlay::None;
-  image_stream_ = -1;
+  end_image();
   clear_prompt();
   transport_active_ = false;
   schedule_reconnect();
@@ -565,6 +565,10 @@ void App::on_transport_binary(const uint8_t* data, size_t len) {
   }
   if (f.channel == proto::Channel::Image) {
     if (image_stream_ < 0 || f.stream != image_stream_ || !hal_.display) return;
+    if (ui_->strips()) {
+      image_strip(f.payload, f.payload_len);
+      return;
+    }
     Canvas c = ui_->canvas();
     const UiLayout& l = ui_->layout();
     c.set_clip_rows(l.main_y, l.main_y + l.main_h);
@@ -618,20 +622,52 @@ void App::h_image_start(const json::Value& m) {
   }
   image_stream_ = static_cast<int>(m["stream"].as_int(0));
   image_px_ = 0;
+  image_carry_.clear();
+  image_row_ = 0;
   image_x_ = (di.width - image_w_) / 2;
   image_y_ = l.main_y + (l.main_h - image_h_) / 2;
+  image_y_ -= image_y_ % ui_->row_align();  // strips send rows in aligned groups
   // Clear the image area once; rows then stream in.
-  Canvas c = ui_->canvas();
-  c.set_clip_rows(l.main_y, l.main_y + l.main_h);
-  c.fill_rect(0, l.main_y, di.width, l.main_h, rgb565(0, 0, 0));
-  ui_->flush(l.main_y, l.main_y + l.main_h);
+  ui_->paint(l.main_y, l.main_y + l.main_h,
+             [&](Canvas& c) { c.fill_rect(0, l.main_y, di.width, l.main_h, rgb565(0, 0, 0)); });
   overlay_ = Overlay::Image;
   double ttl = m["ttl_s"].as_number(30);
   overlay_until_ = ttl <= 0 ? 0 : now() + static_cast<uint32_t>(ttl * 1000);
 }
 
 void App::h_image_end(const json::Value& m) {
-  if (m["stream"].as_int(-1) == image_stream_) image_stream_ = -1;
+  if (m["stream"].as_int(-1) == image_stream_) end_image();
+}
+
+void App::end_image() {
+  image_stream_ = -1;
+  image_carry_.clear();
+  image_carry_.shrink_to_fit();
+}
+
+void App::image_strip(const uint8_t* data, size_t len) {
+  const size_t total = static_cast<size_t>(image_w_) * static_cast<size_t>(image_h_);
+  const size_t n = std::min(len / 2, total - std::min(total, image_px_));
+  const size_t old = image_carry_.size();
+  image_carry_.resize(old + n);
+  std::memcpy(image_carry_.data() + old, data, n * 2);  // payload may be unaligned
+  image_px_ += n;
+  // Whole rows, in aligned groups until the last one arrives.
+  const int a = ui_->row_align();
+  int rows = static_cast<int>(image_carry_.size() / static_cast<size_t>(image_w_));
+  if (image_px_ < total) rows -= rows % a;
+  if (rows <= 0) return;
+  const UiLayout& l = ui_->layout();
+  const int width = ui_->area().width;
+  const int y = image_y_ + image_row_;
+  // An odd final row is padded with the black row below it.
+  const int painted = std::min(l.main_y + l.main_h - y, (rows + a - 1) / a * a);
+  ui_->paint(y, y + painted, [&](Canvas& c) {
+    c.fill_rect(0, y, width, painted, rgb565(0, 0, 0));
+    c.blit(image_x_, y, image_w_, rows, image_carry_.data());
+  });
+  image_carry_.erase(image_carry_.begin(), image_carry_.begin() + static_cast<ptrdiff_t>(rows) * image_w_);
+  image_row_ += rows;
 }
 
 void App::h_prompt(const json::Value& m) {
@@ -1002,7 +1038,7 @@ bool App::turn_page() {
 void App::dismiss_overlay() {
   if (overlay_ == Overlay::None) return;
   overlay_ = Overlay::None;
-  image_stream_ = -1;
+  end_image();
   if (ui_) ui_->invalidate();
 }
 
