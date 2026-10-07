@@ -12,7 +12,9 @@ void TouchGestures::tick(uint32_t now_ms) {
     state_ = State::Ignored;
     app_.open_settings();
   }
-  if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms)) {
+  // On a menu a finger picks a row when it lifts, however long it rested.
+  if (state_ == State::Pending && !app_.menu_open() &&
+      static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms)) {
     state_ = State::Talk;
     press(Button::Talk);
   }
@@ -22,6 +24,10 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   if (!touching) {
     switch (state_) {
       case State::Pending:  // a quick tap
+        if (app_.menu_open()) {
+          app_.menu_tap(x0_, y0_);
+          break;
+        }
         press(Button::Talk);
         release(Button::Talk);
         break;
@@ -43,8 +49,22 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
   }
 
   const int dx = x - x0_, dy = y - y0_;
-  const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open() || app_.wifi_setup_open()) &&
+  const bool menu = app_.menu_open();
+  const bool swiped_down = (cfg_.swipe_cancel || app_.settings_open() || app_.wifi_setup_open() || menu) &&
                           dy >= cfg_.swipe_px && std::abs(dx) < dy;
+  if (menu && state_ == State::Pending) {
+    // A menu: swipe down closes it, swipe up shows the next rows.
+    if (swiped_down) {
+      state_ = State::Ignored;
+      app_.close_menu();
+    } else if (-dy >= cfg_.swipe_px && std::abs(dx) < -dy) {
+      state_ = State::Ignored;
+      app_.menu_page();
+    } else if (std::abs(dx) > cfg_.slop_px && std::abs(dx) >= std::abs(dy)) {
+      state_ = State::Ignored;
+    }
+    return;
+  }
   switch (state_) {
     case State::Settings:
       if (swiped_down) {

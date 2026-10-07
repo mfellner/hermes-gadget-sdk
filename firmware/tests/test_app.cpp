@@ -970,6 +970,8 @@ TEST("settings: physical chord opens locally and saves volume, brightness and ta
   CHECK(r.app.screen() == hg::Screen::Settings);
   r.app.on_button(hg::Button::Talk, false);
   r.app.on_button(hg::Button::Cancel, false);
+  CHECK_EQ(r.app.model().detail, std::string("Hermes"));  // settings open on Hermes's menu
+  r.app.console("cancel");
   CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
   r.app.on_button(hg::Button::Talk, true);
   r.app.on_button(hg::Button::Talk, false);
@@ -1004,7 +1006,7 @@ TEST("settings: hardware checks are local and prompts release the microphone") {
   Rig r;
   r.bring_online(true);
   CHECK(r.app.open_settings());
-  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  for (int i = 0; i < 4; ++i) r.app.console("cancel");
   CHECK_EQ(r.app.model().detail, std::string("Microphone check"));
   r.app.console("talk");
   r.app.console("release");
@@ -1031,7 +1033,7 @@ TEST("settings: hardware checks are local and prompts release the microphone") {
   CHECK_EQ(r.fake.fb[100 * 320 + 150], uint16_t(0x001f));
   r.app.close_settings();
   CHECK(r.app.open_settings());
-  for (int i = 0; i < 3; ++i) r.app.console("cancel");
+  for (int i = 0; i < 4; ++i) r.app.console("cancel");
   r.app.console("talk");
   r.app.console("release");
   CHECK(r.fake.mic_on);
@@ -1052,11 +1054,11 @@ TEST("settings: title hold and menu swipe work without starting a recording") {
   touch.update(false, 0, 0, r.fake.clock);
   CHECK(r.app.screen() == hg::Screen::Settings);
   CHECK(!r.fake.mic_on);
-  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
+  CHECK_EQ(r.app.model().detail, std::string("Hermes"));
   touch.update(true, 100, 80, r.fake.clock);
   touch.update(true, 100, 150, r.fake.clock + 30);
   touch.update(false, 0, 0, r.fake.clock + 40);
-  CHECK_EQ(r.app.model().detail, std::string("Screen brightness"));
+  CHECK_EQ(r.app.model().detail, std::string("Speaker volume"));
   touch.update(true, 100, 4, r.fake.clock);
   r.advance(1100);
   touch.tick(r.fake.clock);
@@ -1120,7 +1122,7 @@ TEST("power: failed readings replace stale data and shutdown requires a second l
   CHECK(status["power"]["battery_mv"].is_null());
   CHECK((*r.fake.last("state"))["sensors"]["battery_mv"].is_null());
   r.app.open_settings();
-  for (int i = 0; i < 10; ++i) r.app.console("cancel");
+  for (int i = 0; i < 11; ++i) r.app.console("cancel");
   CHECK_EQ(r.app.model().detail, std::string("Power off"));
   r.app.console("talk"); r.app.console("release");
   CHECK_EQ(battery.shutdowns, 0);
@@ -1139,7 +1141,7 @@ TEST("power: a peripheral rail cannot be selected as device power-off") {
   r.hal.power = &rail;
   r.bring_online(true);
   CHECK(r.app.open_settings());
-  for (int i = 0; i < 10; ++i) r.app.console("cancel");
+  for (int i = 0; i < 11; ++i) r.app.console("cancel");
   CHECK(r.app.model().detail != "Power off");
   r.app.console("talk"); r.app.console("release");
   r.app.console("talk"); r.app.console("release");
@@ -1254,4 +1256,194 @@ TEST("Wi-Fi setup: phones scan one code to join the network and a second to open
   r.app.on_wifi_setup = [] { return "Network: Hermes-0428\nPassword: 3f9a1c2e"; };
   CHECK(r.app.start_wifi_setup());
   CHECK(r.app.model().qr.empty());
+}
+
+namespace {
+
+const char* kMainMenu =
+    R"({"type":"menu","id":"m1","title":"Hermes","items":[{"id":"status","label":"Status"},)"
+    R"({"id":"model","label":"Model","note":"gpt-x","current":true},{"id":"sessions","label":"Sessions"}]})";
+
+std::string long_menu(const std::string& id, int n) {
+  std::string items;
+  for (int i = 0; i < n; ++i)
+    items += std::string(i ? "," : "") + R"({"id":"s)" + std::to_string(i) + R"(","label":"Session )" +
+             std::to_string(i) + "\"}";
+  return R"({"type":"menu","id":")" + id + R"(","title":"Sessions","items":[)" + items + "]}";
+}
+
+// The panel y of a visible menu row's centre on the rig's display.
+int menu_row_y(Rig& r, int row) {
+  hg::Ui probe(*r.hal.display);
+  for (int y = 0; y < r.fake.height; ++y)
+    if (probe.menu_hit(10, y) == row && probe.menu_hit(10, y + 4) == row) return y + 4;
+  return -1;
+}
+
+}  // namespace
+
+TEST("menu: the device asks for Hermes's menu and picks with the buttons") {
+  Rig r;
+  r.bring_online(true);
+  const Value* hello = r.fake.last("hello");
+  CHECK(hello && (*hello)["caps"]["menu"].as_bool());
+  CHECK(r.app.open_menu());
+  const Value* open = r.fake.last("menu.open");
+  CHECK(open && (*open)["menu"].as_string() == "main");
+  CHECK(r.app.screen() == hg::Screen::Menu);
+  CHECK_EQ(r.app.model().rows.size(), size_t(1));  // "Loading..." until the list arrives
+  CHECK_EQ(r.app.model().hint, std::string("Loading..."));
+
+  r.server(kMainMenu);
+  CHECK_EQ(r.app.model().rows.size(), size_t(4));  // three items and the device's own Close row
+  CHECK_EQ(r.app.model().rows[3].label, std::string("Close"));
+  CHECK_EQ(r.app.model().row_cursor, 1);  // starts on the current choice
+  CHECK(r.app.model().rows[1].current);
+  CHECK_EQ(r.app.model().rows[1].note, std::string("gpt-x"));
+
+  r.app.on_button(hg::Button::Cancel, true);  // CANCEL steps to the next row
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK_EQ(r.app.model().row_cursor, 2);
+  CHECK(r.fake.last("cancel") == nullptr);
+  r.app.on_button(hg::Button::Talk, true);
+  CHECK(!r.fake.mic_on);  // TALK picks; it never records on a menu
+  r.app.on_button(hg::Button::Talk, false);
+  const Value* pick = r.fake.last("menu.select");
+  CHECK(pick && (*pick)["id"].as_string() == "m1" && (*pick)["item"].as_string() == "sessions");
+  CHECK_EQ(r.app.model().hint, std::string("Loading..."));
+  r.fake.sent.clear();
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.last("menu.select") == nullptr);  // one pick at a time
+
+  r.server(R"({"type":"display","title":"Status","body":"Model: gpt-x","ttl_s":60})");
+  CHECK(!r.app.menu_open());
+  CHECK(r.app.screen() == hg::Screen::Card);
+  CHECK(r.fake.last("menu.close") == nullptr);  // the server ended it
+
+  CHECK(r.app.open_menu());
+  r.server(kMainMenu);
+  r.app.console("menu next");
+  r.app.console("menu next");  // from the current row (1) to Close (3)
+  CHECK_EQ(r.app.model().row_cursor, 3);
+  r.app.console("talk");
+  r.app.console("release");
+  const Value* closed = r.fake.last("menu.close");
+  CHECK(closed && (*closed)["id"].as_string() == "m1");
+  CHECK(!r.app.menu_open());
+  CHECK(r.app.screen() == hg::Screen::Ready);
+}
+
+TEST("menu: busy notices keep the list, a server close and a dropped link end it") {
+  Rig r;
+  r.bring_online(true);
+  r.app.open_menu();
+  r.server(kMainMenu);
+  r.app.console("menu pick 1");
+  r.server(R"({"type":"notice","text":"Hermes is busy - try again after the reply"})");
+  CHECK(r.app.menu_open());
+  CHECK_EQ(r.app.model().hint, std::string("Hermes is busy - try again after the reply"));
+  r.fake.sent.clear();
+  r.app.console("menu pick 0");
+  CHECK(r.fake.last("menu.select") != nullptr);  // picking works again
+  r.server(R"({"type":"menu.close","id":"other"})");
+  CHECK(r.app.menu_open());  // another menu's close
+  r.server(R"({"type":"menu.close","id":"m1"})");
+  CHECK(!r.app.menu_open());
+
+  r.app.open_menu();
+  r.server(kMainMenu);
+  r.app.on_transport_closed("lost");
+  CHECK(!r.app.menu_open());
+  Rig unpaired;
+  unpaired.bring_online(false);
+  CHECK(!unpaired.app.open_menu());
+  CHECK(unpaired.fake.last("menu.open") == nullptr);
+}
+
+TEST("menu: an unanswered request times out") {
+  Rig r;
+  r.bring_online(true);
+  r.app.open_menu();
+  r.advance(21000);
+  CHECK(!r.app.menu_open());  // nothing arrived: back to the idle screen
+  CHECK_EQ(r.app.model().detail, std::string("Hermes did not answer"));
+  r.app.open_menu();
+  r.server(kMainMenu);
+  r.app.console("menu pick 0");
+  r.advance(21000);
+  CHECK(r.app.menu_open());  // the list stays for another try
+  CHECK(r.app.model().hint != std::string("Loading..."));
+}
+
+TEST("menu: touch taps a row, swipes up for more and down to close") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  hg::TouchGestures touch(r.app);
+  r.app.open_menu();
+  r.server(long_menu("m2", 20));
+  const int y2 = menu_row_y(r, 2);
+  CHECK(y2 > 0);
+  touch.update(true, 60, y2, r.fake.clock);
+  r.advance(600);  // a resting finger is not a hold-to-talk on a menu
+  touch.tick(r.fake.clock);
+  CHECK(!r.fake.mic_on);
+  touch.update(false, 0, 0, r.fake.clock);
+  const Value* pick = r.fake.last("menu.select");
+  CHECK(pick && (*pick)["item"].as_string() == "s2");
+  CHECK_EQ(r.app.model().row_cursor, 2);
+
+  r.server(long_menu("m3", 20));
+  hg::Ui probe(*r.hal.display);
+  const int rows = probe.menu_rows();
+  CHECK(rows < 20);
+  touch.update(true, 60, 200, r.fake.clock);
+  touch.update(true, 60, 120, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK_EQ(r.app.model().row_top, rows);
+  CHECK(r.app.model().hint.find("more") != std::string::npos);
+  r.fake.sent.clear();
+  touch.update(true, 60, menu_row_y(r, 0), r.fake.clock);
+  touch.update(false, 0, 0, r.fake.clock);
+  pick = r.fake.last("menu.select");
+  CHECK(pick && (*pick)["item"].as_string() == "s" + std::to_string(rows));
+
+  r.server(long_menu("m4", 3));
+  touch.update(true, 60, 80, r.fake.clock);
+  touch.update(true, 60, 170, r.fake.clock + 20);
+  touch.update(false, 0, 0, r.fake.clock + 30);
+  CHECK(!r.app.menu_open());
+  const Value* closed = r.fake.last("menu.close");
+  CHECK(closed && (*closed)["id"].as_string() == "m4");
+  CHECK(r.fake.last("cancel") == nullptr);
+}
+
+TEST("menu: the idle screen and settings show Hermes's model and session") {
+  Rig r;
+  r.bring_online(true);
+  r.server(R"({"type":"info","model":"claude-sonnet-5-5","provider":"Anthropic","session":"Weather plans"})");
+  r.advance(100);
+  CHECK(r.app.screen() == hg::Screen::Ready);
+  CHECK_EQ(r.app.model().detail, std::string("Ask me anything\nclaude-sonnet-5-5\nWeather plans"));
+  CHECK_EQ(int(r.app.model().caption_lines), 3);
+  CHECK(r.app.status_json().find("\"model\":\"claude-sonnet-5-5\"") != std::string::npos);
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().detail, std::string("Hermes"));
+  CHECK(r.app.model().body.find("Model: claude-sonnet-5-5") != std::string::npos);
+  CHECK(r.app.model().body.find("Session: Weather plans") != std::string::npos);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(!r.app.settings_open());
+  CHECK(r.app.menu_open());
+  CHECK(r.fake.last("menu.open") != nullptr);
+  // A question from Hermes takes over the buttons while a menu is open.
+  r.server(kMainMenu);
+  r.server(R"({"type":"prompt","id":"q1","title":"Start over?","text":""})");
+  CHECK(r.app.screen() == hg::Screen::Prompt);
+  CHECK(!r.app.menu_open());
+  r.advance(1000);
+  r.app.console("talk");
+  r.app.console("release");
+  CHECK(r.fake.last("prompt.reply") != nullptr);
+  CHECK(r.app.screen() == hg::Screen::Menu);  // back to the list once answered
 }

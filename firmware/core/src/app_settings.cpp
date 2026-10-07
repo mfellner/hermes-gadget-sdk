@@ -17,7 +17,8 @@ bool App::open_settings() {
   else if (mode_ == Mode::Thinking || mode_ == Mode::Responding) cancel_turn();
   stop_playback();
   dismiss_overlay();
-  menu_ = Menu::Volume;
+  if (menu_active_) close_menu();
+  menu_ = Menu::Hermes;
   power_off_armed_ = false;
   check_result_.clear();
   update_model();
@@ -54,8 +55,8 @@ void App::settings_input(Button button, bool pressed) {
     check_result_.clear();
     power_off_armed_ = false;
     int item = static_cast<int>(menu_) + (button == Button::Up ? -1 : 1);
-    if (item < static_cast<int>(Menu::Volume)) item = static_cast<int>(Menu::Back);
-    if (item > static_cast<int>(Menu::Back)) item = static_cast<int>(Menu::Volume);
+    if (item < static_cast<int>(Menu::Hermes)) item = static_cast<int>(Menu::Back);
+    if (item > static_cast<int>(Menu::Back)) item = static_cast<int>(Menu::Hermes);
     menu_ = static_cast<Menu>(item);
     const bool can_power_off = hal_.power && hal_.power->can_power_off();
     if ((!hal_.power && menu_ == Menu::Power) ||
@@ -75,6 +76,7 @@ void App::settings_input(Button button, bool pressed) {
   }
   check_result_.clear();
   switch (menu_) {
+    case Menu::Hermes: open_menu(); break;
     case Menu::Volume:
       if (hal_.speaker) console("set volume " + std::to_string(volume_ >= 100 ? 0 : std::min(100, volume_ + 10)));
       break;
@@ -158,6 +160,16 @@ void App::settings_model() {
   m.hint = profile_.touch_screen ? "Tap: change | Swipe: next"
                                 : profile_.talk_label + ": change | " + profile_.cancel_label + ": next";
   switch (menu_) {
+    case Menu::Hermes:
+      m.detail = "Hermes";
+      if (!online() || !paired_) {
+        m.body = "Connect and pair to see the model and switch sessions.";
+      } else {
+        m.body = "Model: " + (info_model_.empty() ? std::string("unknown") : info_model_) + "\nSession: " +
+                 (info_session_.empty() ? std::string("untitled") : info_session_) +
+                 "\nSelect for status, model and sessions.";
+      }
+      break;
     case Menu::Volume:
       m.detail = "Speaker volume";
       m.body = hal_.speaker ? std::to_string(volume_) + "%\nChanges are saved." : "No speaker driver is active.";

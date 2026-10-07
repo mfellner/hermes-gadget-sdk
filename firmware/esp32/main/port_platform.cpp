@@ -54,7 +54,7 @@ int sample(Key& k, uint32_t now) {
 
 // Screens where a quick KEY press is an answer, not a way out.
 bool wants_talk_tap(const hg::App& app) {
-  return app.screen() == hg::Screen::Prompt || app.wifi_setup_open() || app.settings_open();
+  return app.screen() == hg::Screen::Prompt || app.wifi_setup_open() || app.settings_open() || app.menu_open();
 }
 
 }  // namespace

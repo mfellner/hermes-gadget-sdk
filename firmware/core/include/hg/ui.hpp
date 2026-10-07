@@ -34,11 +34,19 @@ enum class Screen : uint8_t {
   Updating,  // installing a firmware update
   Settings,
   Setup,
+  Menu,  // a list from Hermes (status, model, sessions), picked with touch or the buttons
 };
 
 enum class Link : uint8_t { Offline, Network, Connecting, Online };
 
 const char* screen_name(Screen s);
+
+// One row of a Menu screen.
+struct MenuRow {
+  std::string label;
+  std::string note;      // right-aligned, dimmed (a count, an age)
+  bool current = false;  // the active choice (accent colour and a dot)
+};
 
 struct UiModel {
   Screen screen = Screen::Boot;
@@ -60,6 +68,10 @@ struct UiModel {
   // instead of the header + text layout.
   bool hero = false;
   uint8_t caption_lines = 1;  // hero: lines the detail may wrap to (then "..")
+  // Menu screen: the rows from `row_top` that fit, with `row_cursor` highlighted (-1: none).
+  std::vector<MenuRow> rows;
+  int row_top = 0;
+  int row_cursor = -1;
 };
 
 struct UiLayout {
@@ -110,12 +122,17 @@ class Ui {
   bool title_hit(int x, int y) const {
     return x >= ox_ && x < ox_ + info_.width && y >= oy_ && y < oy_ + layout_.top_h;
   }
+  // Menu rows that fit on screen, and which visible row (0-based) a panel point is on (-1: none).
+  int menu_rows() const;
+  int menu_hit(int x, int y) const;
 
  private:
   void draw_top(Canvas& c, const UiModel& m);
   void draw_header(Canvas& c, const UiModel& m);
   void draw_content(Canvas& c, const UiModel& m);
   void draw_qr(Canvas& c, const UiModel& m, int y0, int y1);
+  void draw_menu(Canvas& c, const UiModel& m, int y0, int y1);
+  int menu_row_h() const;
   void draw_bottom(Canvas& c, const UiModel& m);
   void draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r);
   struct HeroGeom {

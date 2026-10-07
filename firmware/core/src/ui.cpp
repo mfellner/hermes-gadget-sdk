@@ -136,6 +136,7 @@ const char* screen_name(Screen s) {
     case Screen::Updating: return "updating";
     case Screen::Settings: return "settings";
     case Screen::Setup: return "setup";
+    case Screen::Menu: return "menu";
   }
   return "unknown";
 }
@@ -238,7 +239,13 @@ void Ui::render(const UiModel& m) {
                   .val(m.screen == Screen::Listening ? m.level : uint8_t(0))
                   .val(m.speaking)
                   .get();
-  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).add(m.qr).get();
+  Hash content;
+  content.val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).add(m.qr);
+  if (m.screen == Screen::Menu) {
+    content.val(m.row_top).val(m.row_cursor);
+    for (const MenuRow& r : m.rows) content.add(r.label).add(r.note).val(r.current);
+  }
+  hashes[2] = content.get();
   hashes[3] = Hash().add(m.hint).get();
 
   if (m.hero) {
@@ -395,6 +402,7 @@ void Ui::draw_indicator(Canvas& c, const UiModel& m, int cx, int cy, int r) {
     case Screen::Image:
     case Screen::Settings:
     case Screen::Setup:
+    case Screen::Menu:
       break;
   }
 }
@@ -435,6 +443,10 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
 
   if (!m.qr.empty()) {
     draw_qr(c, m, y0, y1);
+    return;
+  }
+  if (m.screen == Screen::Menu) {
+    draw_menu(c, m, y0, y1);
     return;
   }
 
@@ -675,6 +687,64 @@ void Ui::draw_bottom(Canvas& c, const UiModel& m) {
   c.fill_rect(0, y0, info_.width, layout_.bottom_h, panel_.round ? kBg : kBar);
   std::string hint = fit(m.hint, cols_for(info_.width - 4 * s, s));
   c.text((info_.width - Canvas::text_width(hint, s)) / 2, y0 + s, hint, s, kDim);
+}
+
+}  // namespace hg
+
+namespace hg {
+
+int Ui::menu_row_h() const {
+  const int s = layout_.scale;
+  return (Canvas::line_height(s) + 3 * s + align_ - 1) / align_ * align_;
+}
+
+int Ui::menu_rows() const {
+  const int content = info_.height - layout_.top_h - layout_.header_h - layout_.bottom_h - 2 * layout_.scale;
+  return std::max(1, content / menu_row_h());
+}
+
+int Ui::menu_hit(int x, int y) const {
+  const int lx = x - ox_, ly = y - oy_ - layout_.top_h - layout_.header_h - layout_.scale;
+  if (lx < 0 || lx >= info_.width || ly < 0) return -1;
+  const int row = ly / menu_row_h();
+  return row < menu_rows() ? row : -1;
+}
+
+void Ui::draw_menu(Canvas& c, const UiModel& m, int y0, int y1) {
+  const int s = layout_.scale, w = info_.width, rh = menu_row_h();
+  const int pad = 3 * s, dot_r = std::max(2, s + 1);
+  const int text_x = pad + 2 * dot_r + 2 * s;
+  const int shown = menu_rows();
+  for (int i = 0; i < shown; ++i) {
+    const int idx = m.row_top + i;
+    if (idx < 0 || idx >= static_cast<int>(m.rows.size())) break;
+    const MenuRow& r = m.rows[static_cast<size_t>(idx)];
+    const int ry = y0 + s + i * rh;
+    if (ry + rh > y1) break;
+    if (idx == m.row_cursor) c.fill_round_rect(s, ry, w - 2 * s, rh - s, 2 * s, kBar);
+    const int ty = ry + (rh - s - font::kGlyphHeight * s) / 2;
+    if (r.current) c.fill_circle(pad + dot_r, ty + font::kGlyphHeight * s / 2, dot_r, kAccent);
+    int right = w - pad;
+    if (!r.note.empty()) {
+      // The note gets what the label leaves, and at least a third of the row.
+      const int cols = cols_for(right - text_x, s) - 1;
+      const int label_cols = static_cast<int>(r.label.size());
+      const int note_cols = std::max(cols_for(w / 3, s), cols - label_cols);
+      const std::string note = fit(r.note, std::max(0, note_cols));
+      right -= Canvas::text_width(note, s);
+      c.text(right, ty, note, s, kDim);
+      right -= font::kCellWidth * s;
+    }
+    c.text(text_x, ty, fit(r.label, cols_for(right - text_x, s)), s, r.current ? kAccent : kText);
+  }
+  // More rows than fit: a thin scroll bar on the right edge.
+  const int total = static_cast<int>(m.rows.size());
+  if (total > shown) {
+    const int track = std::min(y1 - y0, shown * rh) - 2 * s;
+    const int bar = std::max(2 * s, track * shown / total);
+    const int top = y0 + s + (track - bar) * std::min(m.row_top, total - shown) / std::max(1, total - shown);
+    c.fill_rect(w - s, top, s, bar, kDim);
+  }
 }
 
 }  // namespace hg
