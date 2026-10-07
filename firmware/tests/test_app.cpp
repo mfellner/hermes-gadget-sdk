@@ -1226,3 +1226,32 @@ TEST("Wi-Fi setup: opening from USB releases an active talk button") {
   r.advance(30000);
   CHECK_EQ(r.fake.brightness, 0);
 }
+
+TEST("Wi-Fi setup: phones scan one code to join the network and a second to open the page") {
+  Rig r(Rig::touch_profile());
+  r.bring_online(true);
+  r.app.on_wifi_setup = [] { return "Network: Hermes-0428\nPassword: 3f9a1c2e\nOpen http://192.168.4.1\nAvailable for 10 minutes."; };
+  CHECK(r.app.start_wifi_setup());
+  CHECK(r.app.screen() == hg::Screen::Setup);
+  CHECK_EQ(r.app.model().qr, std::string("WIFI:T:WPA;S:Hermes-0428;P:3f9a1c2e;;"));
+  CHECK(r.app.model().body.find("3f9a1c2e") != std::string::npos);  // typed by hand if the camera can't
+  r.advance(100);
+  auto before = r.fake.fb;
+  hg::TouchGestures touch(r.app);
+  touch.update(true, 160, 120, r.fake.clock);  // a tap shows the second code
+  touch.update(false, 0, 0, r.fake.clock + 40);
+  CHECK_EQ(r.app.model().qr, std::string("http://192.168.4.1"));
+  r.advance(100);
+  CHECK(r.fake.fb != before);
+  r.app.on_button(hg::Button::Talk, true);  // a button does the same, and back
+  r.app.on_button(hg::Button::Talk, false);
+  CHECK_EQ(r.app.model().qr, std::string("WIFI:T:WPA;S:Hermes-0428;P:3f9a1c2e;;"));
+  CHECK(r.app.console("status").find("3f9a1c2e") == std::string::npos);
+  r.app.on_button(hg::Button::Cancel, false);
+  CHECK(!r.app.wifi_setup_open());
+  CHECK(r.app.model().qr.empty());
+  // Instructions without a page to open stay text only.
+  r.app.on_wifi_setup = [] { return "Network: Hermes-0428\nPassword: 3f9a1c2e"; };
+  CHECK(r.app.start_wifi_setup());
+  CHECK(r.app.model().qr.empty());
+}

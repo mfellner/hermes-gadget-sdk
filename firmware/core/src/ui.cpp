@@ -147,13 +147,27 @@ Ui::Ui(Display& display) : display_(display), panel_(display.info()), info_(pane
     ox_ = (panel_.width - side) / 2;
     oy_ = (panel_.height - side) / 2;
     info_.width = info_.height = static_cast<uint16_t>(side);
+  } else if (panel_.inset) {
+    ox_ = oy_ = panel_.inset;
+    info_.width = static_cast<uint16_t>(std::max(0, panel_.width - 2 * panel_.inset));
+    info_.height = static_cast<uint16_t>(std::max(0, panel_.height - 2 * panel_.inset));
   }
+  align_ = std::max<int>(1, panel_.row_align);
+  if (align_ > 1) {
+    // Rows go to the panel in whole alignment units, so the area and every
+    // band start on one: a strip then never mixes two bands.
+    oy_ -= oy_ % align_;
+    info_.height = static_cast<uint16_t>(info_.height / align_ * align_);
+  }
+  auto aligned = [&](int v) { return (v + align_ - 1) / align_ * align_; };
   int w = info_.width, h = info_.height;
-  int s = std::max(1, std::min(4, std::min(w / 160, h / 120)));
+  // An inset only keeps content off hidden edges; it does not shrink the text.
+  const int sw = panel_.inset ? panel_.width : w, sh = panel_.inset ? panel_.height : h;
+  int s = std::max(1, std::min(4, std::min(sw / 160, sh / 120)));
   layout_.scale = s;
-  layout_.top_h = Canvas::line_height(s) + 2 * s;
+  layout_.top_h = aligned(Canvas::line_height(s) + 2 * s);
   layout_.bottom_h = layout_.top_h;
-  layout_.header_h = Canvas::line_height(s + 1) + 4 * s;
+  layout_.header_h = aligned(Canvas::line_height(s + 1) + 4 * s);
   layout_.main_y = layout_.top_h;
   layout_.main_h = h - layout_.top_h - layout_.bottom_h;
   int margin = 4 * s;
@@ -176,15 +190,41 @@ void Ui::flush(int y0, int y1) {
   display_.flush(static_cast<uint16_t>(y0 + oy_), static_cast<uint16_t>(y1 + oy_));
 }
 
+void Ui::paint_panel_background() {
+  if (!strips()) {
+    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
+    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
+    display_.flush(0, panel_.height);
+    return;
+  }
+  for (int y = 0; y < panel_.height; y += panel_.strip_rows) {
+    const int n = std::min<int>(panel_.strip_rows, panel_.height - y);
+    uint16_t* buf = display_.strip(static_cast<uint16_t>(y));
+    if (!buf) return;
+    Canvas panel(buf, panel_.width, panel_.height, panel_.swap_bytes, panel_.width, y, n);
+    panel.fill_rect(0, y, panel_.width, n, kBg);
+    display_.present(static_cast<uint16_t>(y), static_cast<uint16_t>(y + n));
+  }
+}
+
+void Ui::paint_border(uint16_t* buf, int y, int rows) {
+  Canvas panel(buf, panel_.width, panel_.height, panel_.swap_bytes, panel_.width, y, rows);
+  for (int yy = y; yy < y + rows; ++yy) {
+    if (yy < oy_ || yy >= oy_ + info_.height) {
+      panel.fill_rect(0, yy, panel_.width, 1, kBg);
+    } else {
+      panel.fill_rect(0, yy, ox_, 1, kBg);
+      panel.fill_rect(ox_ + info_.width, yy, panel_.width - ox_ - info_.width, 1, kBg);
+    }
+  }
+}
+
 void Ui::render(const UiModel& m) {
   const int h = info_.height;
   if (!valid_ && (ox_ || oy_)) {
     // Round panel: everything outside the UI area stays the background colour.
-    Canvas panel(display_.framebuffer(), panel_.width, panel_.height, panel_.swap_bytes);
-    panel.fill_rect(0, 0, panel_.width, panel_.height, kBg);
-    display_.flush(0, panel_.height);
+    paint_panel_background();
   }
-  Canvas c = canvas();
   const int y_header = layout_.top_h;
   const int y_content = y_header + layout_.header_h;
   const int y_bottom = h - layout_.bottom_h;
@@ -198,7 +238,7 @@ void Ui::render(const UiModel& m) {
                   .val(m.screen == Screen::Listening ? m.level : uint8_t(0))
                   .val(m.speaking)
                   .get();
-  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).get();
+  hashes[2] = Hash().val(m.screen).add(m.detail).add(m.body).add(m.code).val(m.scroll).val(m.color_test).add(m.qr).get();
   hashes[3] = Hash().add(m.hint).get();
 
   if (m.hero) {
@@ -206,10 +246,10 @@ void Ui::render(const UiModel& m) {
     for (int i : {0, 3}) {
       if (valid_ && hash_[i] == hashes[i]) continue;
       int y0 = i == 0 ? 0 : y_bottom, y1 = i == 0 ? y_header : h;
-      c.set_clip_rows(y0, y1);
-      if (i == 0) draw_top(c, m);
-      else draw_bottom(c, m);
-      flush(y0, y1);
+      paint(y0, y1, [&](Canvas& c) {
+        if (i == 0) draw_top(c, m);
+        else draw_bottom(c, m);
+      });
       hash_[i] = hashes[i];
     }
     uint32_t stat = Hash().val(m.screen).add(m.headline).add(m.detail).add(m.yes).add(m.no).val(m.caption_lines).get();
@@ -220,11 +260,7 @@ void Ui::render(const UiModel& m) {
       hero_anim_rows(m, y0, y1);  // only what can move
       redraw = true;
     }
-    if (redraw) {
-      c.set_clip_rows(y0, y1);
-      draw_hero(c, m);
-      flush(y0, y1);
-    }
+    if (redraw) paint(y0, y1, [&](Canvas& c) { draw_hero(c, m); });
     hero_static_ = stat;
     hero_anim_ = anim;
     hero_valid_ = true;
@@ -251,9 +287,7 @@ void Ui::render(const UiModel& m) {
       continue;
     }
     if (valid_ && hash_[i] == hashes[i]) continue;
-    c.set_clip_rows(bands[i].y0, bands[i].y1);
-    (this->*bands[i].draw)(c, m);
-    flush(bands[i].y0, bands[i].y1);
+    paint(bands[i].y0, bands[i].y1, [&](Canvas& c) { (this->*bands[i].draw)(c, m); });
     hash_[i] = hashes[i];
   }
   valid_ = true;
@@ -398,6 +432,11 @@ void Ui::draw_content(Canvas& c, const UiModel& m) {
   const int lh = Canvas::line_height(s);
   c.fill_rect(0, y0, w, y1 - y0, kBg);
   int y = y0 + margin;
+
+  if (!m.qr.empty()) {
+    draw_qr(c, m, y0, y1);
+    return;
+  }
 
   if (m.color_test) {
     const uint16_t colors[] = {rgb565(255, 0, 0), rgb565(0, 255, 0), rgb565(0, 0, 255),
@@ -591,6 +630,42 @@ void Ui::draw_hero(Canvas& c, const UiModel& m) {
     };
     if (!m.yes.empty()) button(margin, m.yes, kGreenDim);
     if (!m.no.empty()) button(margin + bw + gap, m.no, kRedDim);
+  }
+}
+
+void Ui::draw_qr(Canvas& c, const UiModel& m, int y0, int y1) {
+  // A QR code as large as fits, dark on light with its quiet zone, then the
+  // detail line and up to two body lines under it.
+  if (qr_text_ != m.qr) {
+    qr_text_ = m.qr;
+    qr_code_ = qr::encode(m.qr);
+  }
+  const int s = layout_.scale, w = info_.width, margin = 4 * s, lh = Canvas::line_height(s);
+  const int cols = cols_for(w - 2 * margin, s);
+  std::vector<std::string> lines = wrap_text(m.body, cols);
+  if (lines.size() > 2) lines.resize(2);
+  const int text_h = lh * (1 + static_cast<int>(lines.size()));
+  const int quiet = 4, modules = qr_code_.size + 2 * quiet;
+  int y = y0 + margin;
+  if (qr_code_.size) {
+    const int room = std::min(w - 2 * margin, y1 - y0 - 3 * margin - text_h);
+    const int px = std::max(1, room / modules);
+    const int side = px * modules, x = (w - side) / 2;
+    c.fill_rect(x, y, side, side, rgb565(255, 255, 255));
+    for (int my = 0; my < qr_code_.size; ++my) {
+      const int top = y + (my + quiet) * px;
+      for (int mx = 0; mx < qr_code_.size; ++mx) {
+        if (qr_code_.at(mx, my)) c.fill_rect(x + (mx + quiet) * px, top, px, px, rgb565(0, 0, 0));
+      }
+    }
+    y += side + margin;
+  }
+  const std::string detail = fit(m.detail, cols);
+  c.text((w - Canvas::text_width(detail, s)) / 2, y, detail, s, kAccent);
+  y += lh;
+  for (const std::string& line : lines) {
+    c.text((w - Canvas::text_width(line, s)) / 2, y, line, s, kText);
+    y += lh;
   }
 }
 

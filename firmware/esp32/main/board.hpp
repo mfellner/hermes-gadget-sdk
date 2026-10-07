@@ -42,7 +42,10 @@ struct I2sSpeakerConfig {
   int bclk = -1, ws = -1, dout = -1;
 };
 
-// QSPI AMOLED with a CO5300 controller (round 466x466 panels).
+// QSPI AMOLED panels: CO5300 (round 466x466 modules) and the SH8601-family
+// controller of the 2.16" 480x480 module.
+enum class AmoledInit : uint8_t { Co5300_466, Sh8601_480 };
+
 struct AmoledConfig {
   bool enabled = false;
   uint16_t width = 466, height = 466;
@@ -50,6 +53,10 @@ struct AmoledConfig {
   int gap_x = 0, gap_y = 0;  // the controller's RAM is wider than the glass
   int qspi_mhz = 40;
   bool round = false;
+  AmoledInit init = AmoledInit::Co5300_466;
+  // > 0: no framebuffer; the UI draws in strips of this many rows (boards without PSRAM).
+  uint16_t strip_rows = 0;
+  uint8_t inset = 0;  // pixels the glass hides on each edge (rounded corners)
 };
 
 struct I2cBusConfig {
@@ -68,6 +75,7 @@ struct CodecAudioConfig {
   float amp_supply_v = 5.0f;  // amplifier supply; the ES8311 driver sets its output level from it
   float mic_gain_db = 24.0f;
   SpeakerCodec speaker = SpeakerCodec::Es8311;
+  uint8_t mic_mask = 0x03;  // ES7210 inputs: bit 0 = MIC1, bit 1 = MIC2, ...
 };
 
 // Capacitive touch on the I2C bus: hold to talk, tap, swipe down to cancel.
@@ -79,6 +87,7 @@ struct TouchConfig {
   int rst = -1;
   uint16_t width = 0, height = 0;
   bool mirror_x = false, mirror_y = false;
+  bool swap_xy = false;  // applied after mirroring, like esp_lcd_touch
   TouchController controller = TouchController::Cst9217;
 };
 
@@ -93,6 +102,15 @@ struct ExpanderKeyConfig {
 
 struct ButtonConfig {
   int talk = -1, cancel = -1, up = -1, down = -1;  // active-low GPIOs, -1 = absent
+};
+
+// Keys of a board that runs as an app of the esp32-playground platform, which
+// also open its launcher (active-low GPIOs, -1 = absent):
+//   talk:   held ~0.3 s talks; a quick press only acts as TALK where the screen
+//           asks for it (a question, setup codes, settings)
+//   cancel: a quick press cancels; held 1 s opens the launcher
+struct PlatformKeyConfig {
+  int talk = -1, cancel = -1;
 };
 
 // A battery behind a resistive divider, with a latch that keeps it powered.
@@ -113,6 +131,7 @@ struct BoardConfig {
   I2sMicConfig mic;
   I2sSpeakerConfig speaker;
   ButtonConfig buttons;
+  PlatformKeyConfig platform_keys;
   AmoledConfig amoled;
   I2cBusConfig i2c;
   CodecAudioConfig codec;
@@ -120,6 +139,9 @@ struct BoardConfig {
   ExpanderKeyConfig pwr_key;
   bool axp2101 = false;
   bool axp_audio_supply = false;
+  bool axp_amp_supply = false;   // AXP2101 ALDO2 enables the speaker amplifier (no PA GPIO)
+  bool axp_panel_reset = false;  // AXP2101 ALDO3 is the panel's reset line
+  bool axp_power_key = false;    // PWR short press, read from the AXP2101 IRQ status, toggles the screen
   bool cores3 = false;
   LatchPowerConfig latch_power;
   int status_led = -1;

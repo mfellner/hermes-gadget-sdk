@@ -49,6 +49,15 @@ https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_1_75
 released by Waveshare under the Apache License 2.0. A copy of that license is in
 LICENSES/Apache-2.0.txt.
 
+The SH8601 panel start-up commands for the 2.16" 480x480 module in
+firmware/esp32/main/port_amoled.cpp (kInitSh8601: the register values and their
+order) follow Waveshare's ESP32-C6-Touch-AMOLED-2.16 examples,
+https://github.com/waveshareteam/ESP32-C6-Touch-AMOLED-2.16 at commit
+294543798f1a44e2f2c4d2976522323f2beee11d
+(02_Example/ESP-IDF-v5.5.3/09_LVGL_V9_Test), preceded by the two commands
+Espressif's esp_lcd_sh8601 driver sends first. That repository states no
+license; only these register values are used, as hardware facts.
+
 The BOX-3 panel initialization register values in
 firmware/esp32/main/panel_box3.hpp follow Espressif's ESP32-S3-BOX-3 BSP,
 https://github.com/espressif/esp-bsp/tree/master/bsp/esp-box-3,

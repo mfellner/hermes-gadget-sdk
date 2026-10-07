@@ -16,6 +16,12 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 | [LilyGO T-Display-S3](hardware.md#lilygo-t-display-s3) | BOOT and Button2; send text through the USB console | No onboard microphone or speaker |
 | [ESP32-S3 breadboard build](hardware.md#esp32-s3-breadboard) | Hold the wired TALK button | Wire the microphone and optional speaker |
 
+## ESP32-C6 boards
+
+| Board | Controls | Audio |
+|---|---|---|
+| [Waveshare ESP32-C6-Touch-AMOLED-2.16](hardware.md#waveshare-esp32-c6-touch-amoled-216) | Hold the screen or KEY to talk; BOOT held opens the launcher | Onboard microphones; speaker output. Runs as an app of the [esp32-playground](https://github.com/mfellner/esp32-playground) platform |
+
 Check the exact model and connections in [Hardware and wiring](hardware.md), then follow [Set up a board](setup-board.md). The browser installer lists profiles included in the latest published release. Newly merged profiles may need a [source build](development.md) until the next release.
 
 Voice needs [speech recognition and text-to-speech configured in Hermes](connect-hermes.md#4-enable-speech). Boards without onboard audio can display replies and accept text through the USB console.

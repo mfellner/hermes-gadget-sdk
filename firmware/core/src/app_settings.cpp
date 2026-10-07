@@ -243,6 +243,20 @@ bool App::start_wifi_setup() {
   wake_buttons_ = 0;
   wifi_setup_text_ = on_wifi_setup();
   if (wifi_setup_text_.empty()) set_hint_flash("Wi-Fi setup unavailable; use USB");
+  setup_codes_.reset();
+  setup_page_ = 0;
+  SetupCodes codes;
+  size_t start = 0;
+  while (start < wifi_setup_text_.size()) {
+    size_t end = wifi_setup_text_.find('\n', start);
+    if (end == std::string::npos) end = wifi_setup_text_.size();
+    const std::string_view line = std::string_view(wifi_setup_text_).substr(start, end - start);
+    if (line.substr(0, 9) == "Network: ") codes.ssid = std::string(line.substr(9));
+    else if (line.substr(0, 10) == "Password: ") codes.password = std::string(line.substr(10));
+    else if (line.substr(0, 5) == "Open ") codes.url = std::string(line.substr(5));
+    start = end + 1;
+  }
+  if (!codes.ssid.empty() && !codes.password.empty() && !codes.url.empty()) setup_codes_ = codes;
   update_model();
   return !wifi_setup_text_.empty();
 }
@@ -250,6 +264,7 @@ bool App::start_wifi_setup() {
 void App::close_wifi_setup() {
   if (wifi_setup_text_.empty()) return;
   wifi_setup_text_.clear();
+  setup_codes_.reset();
   if (on_wifi_setup_close) on_wifi_setup_close();
   update_model();
 }

@@ -15,9 +15,19 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 class Canvas {
  public:
   // `stride` is the framebuffer's row length in pixels when this canvas is a
-  // view into a wider framebuffer (0 = `width`).
-  Canvas(uint16_t* pixels, int width, int height, bool swap_bytes, int stride = 0)
-      : px_(pixels), w_(width), h_(height), stride_(stride > 0 ? stride : width), swap_(swap_bytes) {}
+  // view into a wider framebuffer (0 = `width`). A canvas may cover only rows
+  // [row0, row0 + rows) of its height (a strip): `pixels` then points at row
+  // row0, and drawing elsewhere is clipped away (rows = 0: all of them).
+  Canvas(uint16_t* pixels, int width, int height, bool swap_bytes, int stride = 0, int row0 = 0, int rows = 0)
+      : px_(pixels),
+        w_(width),
+        h_(height),
+        stride_(stride > 0 ? stride : width),
+        row0_(row0),
+        row1_(rows > 0 ? row0 + rows : height),
+        swap_(swap_bytes) {
+    reset_clip();
+  }
 
   int width() const { return w_; }
   int height() const { return h_; }
@@ -49,11 +59,14 @@ class Canvas {
  private:
   uint16_t encode(uint16_t c) const { return swap_ ? static_cast<uint16_t>((c >> 8) | (c << 8)) : c; }
 
+  uint16_t* at(int x, int y) const { return px_ + (y - row0_) * stride_ + x; }
+
   uint16_t* px_;
   int w_, h_, stride_;
+  int row0_, row1_;  // rows backed by memory
   bool swap_;
   int clip_y0_ = 0;
-  int clip_y1_ = 1 << 30;
+  int clip_y1_ = 0;
 };
 
 // Greedy word wrap to `max_chars` columns. Honours '\n'; breaks words longer

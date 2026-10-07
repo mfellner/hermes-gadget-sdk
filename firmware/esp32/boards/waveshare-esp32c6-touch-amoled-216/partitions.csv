@@ -1,0 +1,11 @@
+# Platform flash layout for the Waveshare ESP32-C6-Touch-AMOLED-2.16 (16 MiB).
+# Every project that runs on the device must use this exact file; app_switch checks it at configure time.
+# Name,    Type, SubType,  Offset,   Size
+nvs,       data, nvs,      0x9000,   0x10000
+otadata,   data, ota,      0x19000,  0x2000
+phy_init,  data, phy,      0x1B000,  0x1000
+launcher,  app,  factory,  0x20000,  0x200000
+sparklet,  app,  ota_0,    0x220000, 0x400000
+hermes,    app,  ota_1,    0x620000, 0x400000
+nvs_hermes,data, nvs,      0xA20000, 0x10000
+storage,   data, littlefs, 0xA30000, 0x5D0000

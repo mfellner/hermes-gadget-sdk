@@ -41,9 +41,71 @@ menu "Hermes Gadget"
             bool "Waveshare ESP32-S3-LCD-1.54 (ST7789 240x240, ES8311 + ES7210 codecs)"
         config HG_BOARD_T_DISPLAY_S3
             bool "LilyGO T-Display-S3 (ST7789 320x170 on an i80 parallel bus, no audio)"
+        config HG_BOARD_WS_ESP32C6_AMOLED_216
+            bool "Waveshare ESP32-C6-Touch-AMOLED-2.16 (480x480 AMOLED, touch, codecs, no PSRAM)"
+            depends on IDF_TARGET_ESP32C6
         config HG_BOARD_CUSTOM
             bool "Custom pins (configure below)"
     endchoice
+
+    config HG_NVS_PARTITION
+        string "NVS partition for the gadget's settings"
+        default "nvs_hermes" if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default "nvs"
+        help
+            Boards that share flash with other apps keep their settings in a partition of
+            their own. The gadget only ever erases this partition.
+
+    config HG_OTA
+        bool "Over-the-air firmware updates"
+        default n if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default y
+        help
+            Updates go into the other app slot of partitions.csv. Off where the flash holds
+            other apps, which the next slot could belong to.
+
+    config HG_WS_MAX_MESSAGE_KB
+        int "Largest WebSocket message the device reassembles (KiB)"
+        default 32 if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default 512
+        help
+            A text message larger than this is dropped. Boards without PSRAM keep it small
+            so a large message can't exhaust internal RAM.
+
+    config HG_SPEAKER_BUFFER_KB
+        int "Playback buffer in internal RAM when PSRAM is unavailable (KiB)"
+        default 32 if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default 16
+
+    config HG_EVENT_BYTES_KB
+        int "Event payload bytes in flight before producers wait (KiB, 0 = no limit)"
+        default 48 if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default 0
+
+    config HG_MIC_CHUNK_MS
+        int "Microphone audio per frame sent to Hermes (ms)"
+        default 100 if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default 20
+        range 20 200
+        help
+            Codec boards only. Fewer, larger WebSocket writes keep a slow-ACK link from
+            filling the TCP send queue with small segments and stalling the app.
+
+    config HG_WIFI_MODEM_SLEEP
+        bool "Wi-Fi modem sleep between beacons"
+        default n if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default y
+        help
+            Saves power, but the radio only hears the access point at DTIM beacons. On
+            boards where that stalls the microphone upload, keep the radio awake.
+
+    config HG_PLATFORM_APP_SWITCH
+        bool "Runs as one app of the esp32-playground multi-app platform"
+        default y if HG_BOARD_WS_ESP32C6_AMOLED_216
+        default n
+        help
+            Holding BOOT for one second opens the platform launcher, and the app tells the
+            platform bootloader once it started properly (its crash guard).
 
     menu "Custom board pins"
         depends on HG_BOARD_CUSTOM

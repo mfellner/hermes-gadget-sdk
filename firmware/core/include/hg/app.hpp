@@ -94,6 +94,9 @@ class App {
   bool settings_title_hit(int x, int y) const;
   // Returns true when this input only wakes a sleeping display.
   bool wake_display();
+  // Turns the screen off until the next input (a power key's short press).
+  void sleep_display();
+  bool display_sleeping() const { return display_sleeping_; }
   bool start_wifi_setup();
   void close_wifi_setup();
   bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
@@ -149,6 +152,9 @@ class App {
   void h_display(const json::Value& m);
   void h_image_start(const json::Value& m);
   void h_image_end(const json::Value& m);
+  // Strip displays: sends complete image rows straight to the panel.
+  void image_strip(const uint8_t* data, size_t len);
+  void end_image();
   void h_action(const json::Value& m);
   void h_ping(const json::Value& m);
   void h_notice(const json::Value& m);
@@ -230,6 +236,14 @@ class App {
   HardwareCheck hardware_check_ = HardwareCheck::None;
   std::string check_result_;
   std::string wifi_setup_text_;
+  // Phone setup as two QR codes (join the network, open the page), when the
+  // port's instructions name the network ("Network: "), its password
+  // ("Password: ") and the page ("Open <url>"). TALK switches between them.
+  struct SetupCodes {
+    std::string ssid, password, url;
+  };
+  std::optional<SetupCodes> setup_codes_;
+  int setup_page_ = 0;
   bool talk_held_ = false;
   bool settings_chord_fired_ = false;
   uint32_t talk_down_at_ = 0;
@@ -297,6 +311,8 @@ class App {
   int image_stream_ = -1;
   int image_w_ = 0, image_h_ = 0, image_x_ = 0, image_y_ = 0;
   size_t image_px_ = 0;
+  std::vector<uint16_t> image_carry_;  // strip mode: received pixels not yet on the panel
+  int image_row_ = 0;                  // strip mode: first image row in image_carry_
 
   // a yes/no question from Hermes (confirmations, command approvals)
   std::string prompt_id_, prompt_title_, prompt_text_;

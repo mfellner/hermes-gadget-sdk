@@ -1,5 +1,6 @@
 """The production device core (in the simulator) against the production hub."""
 
+import array
 import json
 import math
 import struct
@@ -266,6 +267,22 @@ def test_round_touch_board_talks_with_the_screen(devserver, make_sim):
     assert sim.wait_for(lambda: any(m["type"] == "audio.end" for m in sim.sent), timeout=5)
     # Board settings ride on the same console as the core ones.
     assert sim.console("set touch_cancel pwr") == "@ok touch_cancel"
+
+
+def test_strip_board_renders_without_a_framebuffer(devserver, make_sim):
+    hub, _brain, url = devserver()
+    sim = make_sim(url, board="sim-480x480-strip")
+    assert sim.wait_screen("ready", timeout=10)
+    sim.type_text("ping")
+    assert sim.wait_for(lambda: (sim.last_received("turn.end") or {}).get("outcome") == "success", timeout=10)
+    sim.run_for(0.3)
+    pixels = array.array("H", sim.device.framebuffer_rows())
+    assert len(pixels) == 480 * 480
+    # Every panel pixel was drawn: none still holds the strip buffer's poison colour.
+    assert 0xF81F not in pixels
+    sim.touch(True, 240, 240)
+    assert sim.wait_screen("listening", timeout=2)
+    sim.touch(False)
 
 
 def _update(loop_thread, sim, coro_fn):

@@ -30,7 +30,13 @@ void Wifi::begin(NvsStorage& storage) {
   ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &Wifi::on_event, this));
   ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &Wifi::on_event, this));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+#if CONFIG_HG_WIFI_MODEM_SLEEP
   ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+#else
+  // Modem sleep delays incoming TCP ACKs to the next DTIM beacon, which stalls a
+  // continuous audio upload for hundreds of milliseconds at a time.
+  ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+#endif
   ESP_ERROR_CHECK(esp_wifi_start());
 }
 

@@ -29,3 +29,12 @@ execute_process(
 if(NOT hg_config_check EQUAL 0)
     message(FATAL_ERROR "The generated sdkconfig doesn't match its defaults (see above).")
 endif()
+
+# The ESP32-C6 board lives in the `hermes` slot of the esp32-playground platform:
+# its flash layout and bootloader contract are checked, `idf.py hermes-flash`
+# writes only that slot, and `idf.py flash` (which would overwrite the
+# platform's launcher) is disabled.
+idf_build_get_property(hg_target IDF_TARGET)
+if(hg_target STREQUAL "esp32c6")
+    platform_app_slot(hermes)
+endif()

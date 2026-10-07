@@ -8,6 +8,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_psram.h"
+#include "freertos/task.h"
 #include "hg/touch.hpp"
 #include "nvs_flash.h"
 #include "sdkconfig.h"
@@ -20,7 +21,9 @@ hgp::EspSystem g_system;
 hgp::NvsStorage g_storage;
 hgp::WsTransport g_transport;
 hgp::SpiDisplay g_display;
+#if SOC_LCD_I80_SUPPORTED
 hgp::ParallelDisplay g_parallel;
+#endif
 hgp::AmoledDisplay g_amoled;
 hgp::I2sMic g_mic;
 hgp::I2sSpeaker g_speaker;
@@ -51,10 +54,13 @@ void apply_touch_cancel() {
 }
 
 void init_nvs() {
-  esp_err_t err = nvs_flash_init();
+  // Only the gadget's own partition is ever erased; on boards that share flash
+  // with other apps it is not the default one (CONFIG_HG_NVS_PARTITION).
+  const char* part = CONFIG_HG_NVS_PARTITION;
+  esp_err_t err = nvs_flash_init_partition(part);
   if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    err = nvs_flash_init();
+    ESP_ERROR_CHECK(nvs_flash_erase_partition(part));
+    err = nvs_flash_init_partition(part);
   }
   ESP_ERROR_CHECK(err);
 }
@@ -134,6 +140,11 @@ void dispatch(hg::App& app, hgp::Event& ev) {
         app.on_button(hg::Button::Cancel, reinterpret_cast<const hgp::KeySample*>(ev.data)->pressed);
       }
       break;
+    case EventType::PowerKey:
+      // A short press of a PMIC power key: screen off, or back on.
+      if (app.display_sleeping()) app.wake_display();
+      else app.sleep_display();
+      break;
   }
 }
 
@@ -145,6 +156,7 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   const hgp::BoardConfig& board = hgp::board_config();
+  hgp::platform::begin(board.platform_keys);
   const bool latch_power = board.latch_power.enabled && g_latch_power.begin(board.latch_power);
   const char* version = esp_app_get_description()->version;
   ESP_LOGI(TAG, "Hermes Gadget %s on %s", version, board.name);
@@ -172,35 +184,52 @@ extern "C" void app_main(void) {
   if (latch_power) hal.power = &g_latch_power;
   if (g_updater.capacity()) hal.updater = &g_updater;
   i2c_master_bus_handle_t i2c_bus = hgp::i2c::bus(board.i2c);
+  // A PMIC that resets the panel must be up before the display.
+  if (board.axp2101 && board.axp_panel_reset) g_power.begin(i2c_bus);
   const bool peripherals_ready = !board.cores3 || g_cores3.begin(i2c_bus);
   if (board.cores3 && peripherals_ready)
     g_display.board_backlight = [](uint8_t percent) { g_cores3.set_backlight(percent); };
   if (peripherals_ready && board.lcd.enabled) {
     if (board.lcd.bus.type == hgp::LcdBus::Type::I80) {
+#if SOC_LCD_I80_SUPPORTED
       if (g_parallel.begin(board.lcd, hgp::lcd_power_pin(board))) hal.display = &g_parallel;
+#endif
     } else if (g_display.begin(board.lcd, i2c_bus)) {
       hal.display = &g_display;
     }
-  } else if (board.amoled.enabled && g_amoled.begin(board.amoled)) {
-    hal.display = &g_amoled;
+  } else if (board.amoled.enabled) {
+    auto panel_reset = [&] {
+      // ALDO3 is the panel's reset line: on, off, on, 100 ms each.
+      for (bool on : {true, false, true}) {
+        g_power.set_panel_reset_rail(on);
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+    };
+    if (g_amoled.begin(board.amoled, board.axp_panel_reset && g_power.ready() ? std::function<void()>(panel_reset)
+                                                                               : std::function<void()>()))
+      hal.display = &g_amoled;
   }
   if (board.mic.enabled && g_mic.begin(board.mic)) hal.mic = &g_mic;
   if (board.speaker.enabled && g_speaker.begin(board.speaker)) hal.speaker = &g_speaker;
   if (board.axp2101 && g_power.begin(i2c_bus)) hal.power = &g_power;
   const bool audio_power = peripherals_ready && (!board.axp_audio_supply || g_power.enable_audio_supply());
   if (!audio_power) ESP_LOGE(TAG, "audio supply unavailable");
+  if (board.axp_amp_supply && !g_power.enable_amp_supply()) ESP_LOGE(TAG, "speaker amplifier supply unavailable");
   if (board.codec.enabled && audio_power && g_codec.begin(board.codec, i2c_bus)) {
     if (g_codec_mic.begin(g_codec.in())) hal.mic = &g_codec_mic;
     if (g_codec_speaker.begin(g_codec.out())) hal.speaker = &g_codec_speaker;
   }
   g_buttons.begin(board.buttons);
-  const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled) &&
-                     g_touch.begin(board.touch, board.pwr_key, i2c_bus);
+  const bool touch = peripherals_ready && (board.touch.enabled || board.pwr_key.enabled || board.axp_power_key) &&
+                     g_touch.begin(board.touch, board.pwr_key, i2c_bus,
+                                   board.axp_power_key && g_power.ready() ? &g_power : nullptr);
 
   hgp::diag::Parts parts;
   parts.display = hal.display == &g_display ? g_display.controller_name()
+#if SOC_LCD_I80_SUPPORTED
                       : hal.display == &g_parallel ? "st7789-i80"
-                      : hal.display == &g_amoled ? "co5300"
+#endif
+                      : hal.display == &g_amoled ? (board.amoled.init == hgp::AmoledInit::Sh8601_480 ? "sh8601" : "co5300")
                                                 : "none";
   parts.mic = hal.mic == &g_codec_mic ? "es7210" : hal.mic == &g_mic ? "i2s" : "none";
   parts.speaker = hal.speaker == &g_codec_speaker ?
@@ -218,7 +247,7 @@ extern "C" void app_main(void) {
   profile.default_name = CONFIG_HG_DEFAULT_NAME;
   profile.default_server_url = CONFIG_HG_DEFAULT_SERVER_URL;
   profile.default_access_token = CONFIG_HG_DEFAULT_ACCESS_TOKEN;
-  profile.has_cancel_button = board.buttons.cancel >= 0 || touch;
+  profile.has_cancel_button = board.buttons.cancel >= 0 || board.platform_keys.cancel >= 0 || touch;
   profile.has_scroll_buttons = board.buttons.up >= 0 && board.buttons.down >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
@@ -258,6 +287,8 @@ extern "C" void app_main(void) {
       } while (hgp::events::receive(ev, 0));
     }
     g_buttons.poll(app);
+    hgp::platform::poll_keys(app, g_system.now_ms());
+    hgp::platform::tick(g_system.now_ms());
     g_wifi.tick(app, g_system.now_ms());
     if (g_gestures) g_gestures->tick(g_system.now_ms());
     app.tick();

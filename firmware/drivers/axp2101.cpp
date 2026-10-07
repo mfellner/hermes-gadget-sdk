@@ -38,4 +38,42 @@ bool Axp2101::enable_aldo1_3v3() {
          write_(0x90, static_cast<uint8_t>(enabled | 0x01));
 }
 
+bool Axp2101::enable_aldo2_3v3() {
+  uint8_t voltage, enabled;
+  if (!read_(0x93, &voltage, 1) || !read_(0x90, &enabled, 1)) return false;
+  return write_(0x93, static_cast<uint8_t>((voltage & 0xe0) | 28)) &&
+         write_(0x90, static_cast<uint8_t>(enabled | 0x02));
+}
+
+bool Axp2101::set_aldo3_3v3(bool on) {
+  uint8_t voltage, enabled;
+  if (!read_(0x94, &voltage, 1) || !read_(0x90, &enabled, 1)) return false;
+  return write_(0x94, static_cast<uint8_t>((voltage & 0xe0) | 28)) &&
+         write_(0x90, static_cast<uint8_t>(on ? enabled | 0x04 : enabled & ~0x04));
+}
+
+namespace {
+constexpr uint8_t kPowerOffEnable = 0x22, kKeyLevels = 0x27, kIrqEnable2 = 0x41, kIrqStatus2 = 0x49;
+constexpr uint8_t kKeyShortBit = 1 << 3, kKeyLongBit = 1 << 2;
+}  // namespace
+
+bool Axp2101::configure_power_key() {
+  uint8_t off, levels, enable;
+  if (!read_(kPowerOffEnable, &off, 1) || !read_(kKeyLevels, &levels, 1) || !read_(kIrqEnable2, &enable, 1)) return false;
+  // 0x22 bit 1: a long press powers off; bit 0 clear: off rather than restart.
+  // 0x27 bits 5:4 = 01: long-press event at 1.5 s; bits 3:2 = 01: power off at 6 s.
+  return write_(kPowerOffEnable, static_cast<uint8_t>((off | 0x02) & ~0x01)) &&
+         write_(kKeyLevels, static_cast<uint8_t>((levels & ~0x3c) | 0x10 | 0x04)) &&
+         write_(kIrqEnable2, static_cast<uint8_t>(enable | kKeyShortBit | kKeyLongBit)) &&
+         write_(kIrqStatus2, kKeyShortBit | kKeyLongBit);
+}
+
+unsigned Axp2101::take_power_key() {
+  uint8_t status;
+  if (!read_(kIrqStatus2, &status, 1)) return kKeyNone;
+  status &= kKeyShortBit | kKeyLongBit;
+  if (!status || !write_(kIrqStatus2, status)) return kKeyNone;  // write-1-to-clear
+  return (status & kKeyShortBit ? unsigned(kKeyShort) : 0u) | (status & kKeyLongBit ? unsigned(kKeyLong) : 0u);
+}
+
 }  // namespace hg

@@ -37,7 +37,7 @@ i2s_std_config_t std_config(uint32_t rate, i2s_data_bit_width_t bits, int bclk, 
 // Microphone
 
 bool I2sMic::begin(const I2sMicConfig& cfg) {
-  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+  i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(HG_SECOND_I2S, I2S_ROLE_MASTER);
   if (i2s_new_channel(&chan, nullptr, &rx_) != ESP_OK) return false;
   // INMP441 outputs 24-bit samples in a 32-bit left slot.
   i2s_std_config_t std_cfg = std_config(rate_, I2S_DATA_BIT_WIDTH_32BIT, cfg.sck, cfg.ws, -1, cfg.sd);
@@ -99,7 +99,7 @@ bool I2sSpeaker::begin(const I2sSpeakerConfig& cfg) {
   uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   static StaticStreamBuffer_t control;
   if (storage) buffer_ = xStreamBufferCreateStatic(kSpeakerBuffer, 1, storage, &control);
-  else buffer_ = xStreamBufferCreate(16 * 1024, 1);
+  else buffer_ = xStreamBufferCreate(CONFIG_HG_SPEAKER_BUFFER_KB * 1024, 1);  // internal RAM
   if (!buffer_) return false;
   xTaskCreate(&I2sSpeaker::task, "hg-spk", 4096, this, 7, nullptr);
   ESP_LOGI(TAG, "speaker ready");

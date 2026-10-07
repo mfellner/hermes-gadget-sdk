@@ -1,6 +1,7 @@
 // Simulator HAL: forwards every driver call to host callbacks.
 #include "hgsim.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -25,13 +26,33 @@ class SimHal final : public hg::Display,
     info_.swap_bytes = false;
     info_.has_backlight = cfg.has_backlight != 0;
     info_.round = cfg.round != 0;
+    info_.row_align = static_cast<uint8_t>(cfg.row_align > 1 ? cfg.row_align : 1);
+    info_.inset = static_cast<uint8_t>(cfg.inset > 0 && cfg.inset < 64 ? cfg.inset : 0);
+    if (cfg.strip_rows > 0) {
+      info_.strip_rows = static_cast<uint16_t>(std::min(cfg.strip_rows, std::max(cfg.height, 1)));
+      strip_.resize(static_cast<size_t>(cfg.width) * info_.strip_rows);
+    }
   }
 
-  // Display
+  // Display. In strip mode fb_ stands in for the panel's own memory.
   hg::DisplayInfo info() const override { return info_; }
-  uint16_t* framebuffer() override { return fb_.data(); }
+  uint16_t* framebuffer() override { return info_.strip_rows ? nullptr : fb_.data(); }
+  const uint16_t* panel() const { return fb_.data(); }
   void flush(uint16_t y0, uint16_t y1) override {
     if (host_.display_flush) host_.display_flush(host_.user, y0, y1);
+  }
+  uint16_t* strip(uint16_t y0) override {
+    if (!info_.strip_rows) return nullptr;
+    // Like a reused DMA buffer: anything the UI fails to redraw shows up magenta.
+    std::fill(strip_.begin(), strip_.end(), static_cast<uint16_t>(0xF81F));
+    strip_y_ = y0;
+    return strip_.data();
+  }
+  void present(uint16_t y0, uint16_t y1) override {
+    if (!info_.strip_rows || y0 != strip_y_ || y1 <= y0 || y1 > info_.height || y1 - y0 > info_.strip_rows) return;
+    std::copy(strip_.begin(), strip_.begin() + static_cast<size_t>(y1 - y0) * info_.width,
+              fb_.begin() + static_cast<size_t>(y0) * info_.width);
+    flush(y0, y1);
   }
   void set_backlight(uint8_t percent) override {
     if (host_.display_backlight) host_.display_backlight(host_.user, percent);
@@ -104,6 +125,8 @@ class SimHal final : public hg::Display,
   hgsim_host host_;
   hg::DisplayInfo info_;
   std::vector<uint16_t> fb_;
+  std::vector<uint16_t> strip_;
+  int strip_y_ = -1;
 };
 
 // The update slot, apart from SimHal: hg::Updater and hg::AudioOut both have an abort().
@@ -292,7 +315,7 @@ const uint16_t* hgsim_framebuffer(hgsim* sim, int* width, int* height) {
   hg::DisplayInfo di = sim->hal_impl->info();
   if (width) *width = di.width;
   if (height) *height = di.height;
-  return sim->hal_impl->framebuffer();
+  return sim->hal_impl->panel();
 }
 
 }  // extern "C"
